@@ -37,9 +37,11 @@ button:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible
 .primary:hover{border-color:var(--ink)}
 button:disabled{opacity:.55;cursor:default}
 .linkish{background:none;border:0;padding:0;color:var(--muted);font-weight:500;text-decoration:underline;font-size:13px}
-.disc-bar{display:flex;gap:4px;overflow-x:auto;border-bottom:3px solid var(--ink);scrollbar-width:thin}
-.disc-bar [role=tab]{font-family:var(--display);font-weight:700;font-size:20px;text-transform:uppercase;letter-spacing:.03em;border:0;border-radius:6px 6px 0 0;background:transparent;color:var(--muted);padding:10px 16px 8px;white-space:nowrap}
-.disc-bar [role=tab][aria-selected=true]{background:var(--ink);color:var(--bg)}
+.disc-bar{display:flex;flex-wrap:wrap;gap:6px;padding-bottom:14px;border-bottom:3px solid var(--ink)}
+.disc-bar [role=tab]{font-family:var(--display);font-weight:700;font-size:18px;text-transform:uppercase;letter-spacing:.03em;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);padding:8px 12px 7px;white-space:nowrap}
+.disc-bar [role=tab]:hover{border-color:var(--ink)}
+.disc-bar [role=tab][aria-selected=true]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+@media (max-width:520px){.disc-bar [role=tab]{font-size:16px;padding:7px 10px 6px}}
 .disc-bar [role=tab] small{font-family:var(--mono);font-size:12px;font-weight:400;margin-left:6px;opacity:.7}
 .cat-bar{display:flex;flex-wrap:wrap;gap:8px}
 .cat-bar [role=tab]{border-radius:999px;padding:7px 14px;font-weight:600;font-size:14px}
