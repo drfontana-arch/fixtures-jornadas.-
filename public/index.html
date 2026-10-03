@@ -195,7 +195,7 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;color:v
   </main>
 
   <footer>
-    <span><span id="updated"></span> · Se registran visitas en forma anónima (dispositivo y ciudad aproximada) para estadísticas de la organización.</span>
+    <span></span>
     <span><button id="authBtn" class="linkish">Acceso organización</button></span>
   </footer>
 </div>
@@ -234,7 +234,6 @@ async function load() {
   S.loaded = true;
   if (error) { S.error = "No se pudieron cargar los fixtures. Revisá tu conexión y recargá la página."; render(); return; }
   S.error = null; S.docs = data || [];
-  $("#updated").textContent = "Actualizado " + new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
   render();
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
