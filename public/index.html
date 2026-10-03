@@ -394,10 +394,8 @@ function render() {
 
   // Archivos originales, siempre disponibles para descargar.
   const failed = sheets.filter(d => PARSED.get(d.id)?.status === "ok" && !PARSED.get(d.id).rows.length || PARSED.get(d.id)?.status === "err");
-  const others = inCat.filter(d => !isSheet(d));
   out.append(el("section", { class: "day" },
     el("h2", {}, "Archivos", el("span", { class: "n", text: `${inCat.length} archivo${inCat.length === 1 ? "" : "s"}` })),
-    others.length ? el("p", { class: "hint", text: "Los PDF e imágenes no se pueden filtrar: abrilos para ver el detalle." }) : null,
     failed.length ? el("p", { class: "hint", text: `No se pudieron leer partidos de: ${failed.map(d => d.titulo).join(", ")}. Abrí el archivo para verlo.` }) : null,
     el("div", { class: "list" }, [...inCat].sort((a, b) => coll.compare(a.categoria, b.categoria) || coll.compare(a.titulo, b.titulo)).map(card))));
 }
