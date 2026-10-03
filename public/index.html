@@ -166,16 +166,13 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;color:v
       <div><b>Elegí o arrastrá archivos</b> (PDF, Excel, imagen, Word…)</div>
       <div class="files" id="fileList"></div>
     </label>
-    <p class="hint">Los Excel y CSV además se pueden ver como tabla directo en la página. Máximo 50 MB por archivo.</p>
+    <p class="hint">Cargá solo disciplina y categoría. De los Excel y CSV la página lee cada partido, así los delegados filtran por departamental, día y cancha (la planilla necesita encabezados como «Día» o «Fecha», «Cancha» o «Sede», y «Departamental» o los equipos). Los PDF quedan para descargar. Máximo 50 MB por archivo.</p>
     <div class="grid">
       <label class="f">Disciplina *<input id="upDisc" list="dlDisc" placeholder="Ej.: Fútbol 11"></label>
       <label class="f">Categoría *<input id="upCat" list="dlCat" placeholder="Ej.: Sub 14 masculino"></label>
-      <label class="f">Departamental<input id="upDep" list="dlDep" placeholder="Vacío = todas"></label>
-      <label class="f">Día<input id="upDia" type="date"></label>
-      <label class="f">Cancha<input id="upCancha" list="dlCancha" placeholder="Vacío = todas"></label>
       <label class="f">Título (opcional)<input id="upTitulo" placeholder="Si queda vacío, el nombre del archivo"></label>
     </div>
-    <datalist id="dlDisc"></datalist><datalist id="dlCat"></datalist><datalist id="dlDep"></datalist><datalist id="dlCancha"></datalist>
+    <datalist id="dlDisc"></datalist><datalist id="dlCat"></datalist>
     <div class="row">
       <button id="doUpload" class="primary">Subir</button>
       <button id="cancelUpload">Cerrar</button>
@@ -242,6 +239,90 @@ async function load() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 
+/* ---------- lectura de planillas: cada fila es un partido ---------- */
+const PARSED = new Map(); // id del archivo -> { status, rows, headers }
+const norm = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+const COLS = {
+  dia: /\b(dia|fecha|jornada)\b/,
+  hora: /\b(hora|horario)\b/,
+  cancha: /cancha|sede|lugar|estadio|predio|campo|gimnasio|pista|escenario/,
+  dep: /departamental|depto|delegacion|distrito|municipio|partido de origen/,
+  team: /equipo|local|visitante|rival|^vs\.?$|^(eq\.? ?)?[ab12]$/,
+};
+const kindOf = h => { const n = norm(h); for (const k of ["dep", "dia", "hora", "cancha", "team"]) if (COLS[k].test(n)) return k; return null; };
+
+function parseSheet(ws, sheetName, multi) {
+  const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: false, defval: "" })
+    .map(r => r.map(c => String(c).trim())).filter(r => r.some(Boolean));
+  if (!grid.length) return { headers: [], rows: [] };
+  // El encabezado es la fila (entre las primeras 15) con más columnas reconocibles.
+  let hi = 0, best = 0;
+  grid.slice(0, 15).forEach((r, i) => { const sc = r.filter(c => c && kindOf(c)).length; if (sc > best) { best = sc; hi = i; } });
+  const kinds = grid[hi].map(kindOf);
+  // Nombres comunes para que planillas distintas compartan columnas.
+  const teamIdx = kinds.map((k, i) => k === "team" ? i : -1).filter(i => i >= 0);
+  const CANON = { hora: "Hora", cancha: "Cancha", dep: "Departamental" };
+  const seen = {};
+  const headers = grid[hi].map((h, i) => {
+    let name = CANON[kinds[i]] || (kinds[i] === "team" && teamIdx.length === 2 ? (i === teamIdx[0] ? "Equipo A" : "Equipo B") : h) || `Col ${i + 1}`;
+    seen[name] = (seen[name] || 0) + 1;
+    return seen[name] > 1 ? `${name} ${seen[name]}` : name;
+  });
+  const idx = k => kinds.map((x, i) => x === k ? i : -1).filter(i => i >= 0);
+  const depCols = idx("dep").length ? idx("dep") : idx("team");
+  const diaCol = idx("dia")[0], horaCol = idx("hora")[0], canchaCol = idx("cancha")[0];
+  const rows = grid.slice(hi + 1)
+    .filter(r => norm(r.join("|")) !== norm(grid[hi].join("|")))
+    .map(r => {
+      const cells = {};
+      headers.forEach((h, i) => { if (r[i]) cells[h] = r[i]; });
+      return {
+        cells,
+        dep: depCols.map(i => r[i]).filter(Boolean),
+        dia: diaCol != null ? r[diaCol] : (multi ? sheetName : ""),
+        hora: horaCol != null ? r[horaCol] : "",
+        cancha: canchaCol != null ? r[canchaCol] : "",
+      };
+    })
+    .filter(x => Object.keys(x.cells).length >= 2);
+  return { headers: headers.filter((h, i) => i !== diaCol), rows };
+}
+
+async function parseDoc(d) {
+  PARSED.set(d.id, { status: "loading" });
+  try {
+    for (let i = 0; !window.XLSX && i < 50; i++) await new Promise(r => setTimeout(r, 100));
+    if (!window.XLSX) throw new Error("lector");
+    const r = await fetch(publicUrl(d.path));
+    if (!r.ok) throw new Error(r.status);
+    const buf = await r.arrayBuffer();
+    const wb = ext(d.path) === "csv" ? XLSX.read(new TextDecoder().decode(buf), { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
+    const headers = [], rows = [];
+    const multi = wb.SheetNames.length > 1;
+    for (const sn of wb.SheetNames) {
+      const p = parseSheet(wb.Sheets[sn], sn, multi);
+      p.headers.forEach(h => { if (!headers.includes(h)) headers.push(h); });
+      p.rows.forEach(x => rows.push({ ...x, doc: d }));
+    }
+    PARSED.set(d.id, { status: "ok", headers, rows });
+  } catch (e) { PARSED.set(d.id, { status: "err", headers: [], rows: [] }); }
+  render();
+}
+
+// Ordena días tipo "10/10", "10/10/2026" o "Sábado 10" de forma cronológica cuando se puede.
+function diaKey(s) {
+  const m = String(s).match(/(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?/);
+  if (m) return `${(m[3] || "2026").padStart(4, "20")}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  const iso = String(s).match(/^\d{4}-\d{2}-\d{2}/);
+  if (iso) return iso[0];
+  const dias = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
+  const k = dias.findIndex(x => norm(s).includes(x));
+  return k >= 0 ? `9-${k}` : `z-${norm(s)}`;
+}
+const byDia = (a, b) => diaKey(a).localeCompare(diaKey(b)) || coll.compare(a, b);
+const fmtDiaTxt = s => { const k = diaKey(s); if (/^\d{4}-/.test(k)) { const t = new Date(k + "T12:00:00"); if (!isNaN(t)) return t.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" }); } return s; };
+const horaKey = h => { const m = String(h).match(/(\d{1,2})[:.h ]?(\d{2})?/); return m ? m[1].padStart(2, "0") + (m[2] || "00") : "99"; };
+
 /* ---------- render ---------- */
 function render() {
   const docs = S.docs;
@@ -262,62 +343,82 @@ function render() {
   }
   cb.hidden = !cats.length;
 
-  fillSelect("#fDep", "Todas", uniq(inCat.map(d => d.departamental)), "dep");
-  fillSelect("#fDia", "Todos", uniq(inCat.map(d => d.dia)), "dia", fmtDia);
-  fillSelect("#fCancha", "Todas", uniq(inCat.map(d => d.cancha)), "cancha");
-  $("#filters").hidden = !inCat.length;
-
-  // Un fixture sin departamental o cancha cargada aplica a todas: se muestra con cualquier filtro.
-  const shown = inCat.filter(d =>
-    (S.f.dep === ALL || d.departamental === S.f.dep || !d.departamental) &&
-    (S.f.dia === ALL || d.dia === S.f.dia) &&
-    (S.f.cancha === ALL || d.cancha === S.f.cancha || !d.cancha));
-  $("#count").textContent = `${shown.length} de ${inCat.length} archivo${inCat.length === 1 ? "" : "s"}`;
-
-  for (const [id, key] of [["#dlDisc", "disciplina"], ["#dlCat", "categoria"], ["#dlDep", "departamental"], ["#dlCancha", "cancha"]])
+  for (const [id, key] of [["#dlDisc", "disciplina"], ["#dlCat", "categoria"]])
     $(id).replaceChildren(...uniq(docs.map(d => d[key])).map(v => el("option", { value: v })));
 
   const out = $("#results"); out.replaceChildren();
-  if (S.error) { out.append(el("div", { class: "empty" }, el("strong", { text: "Sin conexión" }), S.error)); return; }
-  if (!S.loaded) { out.append(el("div", { class: "empty" }, el("strong", { text: "Cargando fixtures…" }))); return; }
+  if (S.error) { $("#filters").hidden = true; out.append(el("div", { class: "empty" }, el("strong", { text: "Sin conexión" }), S.error)); return; }
+  if (!S.loaded) { $("#filters").hidden = true; out.append(el("div", { class: "empty" }, el("strong", { text: "Cargando fixtures…" }))); return; }
   if (!docs.length) {
+    $("#filters").hidden = true;
     out.append(el("div", { class: "empty" }, el("strong", { text: "Todavía no hay fixtures" }),
       S.canEdit ? "Usá «Subir fixtures» para cargar el primero: elegí el archivo, la disciplina y la categoría." : "La organización todavía no cargó planillas. Volvé a mirar más tarde."));
     return;
   }
-  if (!shown.length) { out.append(el("div", { class: "empty" }, el("strong", { text: "Sin resultados" }), "Ningún fixture coincide con esos filtros. Probá con «Limpiar filtros».")); return; }
 
-  const byDay = {};
-  shown.forEach(d => (byDay[d.dia || ""] ||= []).push(d));
-  const days = Object.keys(byDay).sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b));
-  for (const day of days) {
-    const items = byDay[day].sort((a, b) => coll.compare(a.categoria, b.categoria) || coll.compare(a.cancha || "", b.cancha || "") || coll.compare(a.titulo, b.titulo));
+  // Leer las planillas de la pestaña actual (una sola vez cada una).
+  const sheets = inCat.filter(isSheet);
+  sheets.forEach(d => { if (!PARSED.has(d.id)) parseDoc(d); });
+  const loading = sheets.some(d => PARSED.get(d.id)?.status === "loading");
+  const all = sheets.flatMap(d => PARSED.get(d.id)?.rows || []);
+
+  fillSelect("#fDep", "Todas", uniq(all.flatMap(r => r.dep)), "dep");
+  fillSelect("#fDia", "Todos", [...new Set(all.map(r => r.dia).filter(Boolean))].sort(byDia), "dia", fmtDiaTxt);
+  fillSelect("#fCancha", "Todas", uniq(all.map(r => r.cancha)), "cancha");
+  $("#filters").hidden = !all.length;
+  const shown = all.filter(r =>
+    (S.f.dep === ALL || r.dep.includes(S.f.dep)) &&
+    (S.f.dia === ALL || r.dia === S.f.dia) &&
+    (S.f.cancha === ALL || r.cancha === S.f.cancha));
+  $("#count").textContent = `${shown.length} de ${all.length} partido${all.length === 1 ? "" : "s"}`;
+
+  // Partidos agrupados por día.
+  if (loading && !all.length) out.append(el("p", { class: "hint", text: "Leyendo fixtures…" }));
+  if (all.length && !shown.length) out.append(el("div", { class: "empty" }, el("strong", { text: "Sin partidos" }), "Ningún partido coincide con esos filtros. Probá con «Limpiar filtros»."));
+  const groups = {};
+  shown.forEach(r => (groups[r.dia || ""] ||= []).push(r));
+  Object.keys(groups).sort((a, b) => !a ? 1 : !b ? -1 : byDia(a, b)).forEach(day => {
+    const rows = groups[day].sort((a, b) => horaKey(a.hora).localeCompare(horaKey(b.hora)) || coll.compare(a.cancha, b.cancha));
+    const heads = [];
+    rows.forEach(r => (PARSED.get(r.doc.id)?.headers || []).forEach(h => { if (!heads.includes(h) && rows.some(x => x.cells[h])) heads.push(h); }));
+    const FIRST = ["Hora", "Cancha", "Departamental", "Equipo A", "Equipo B"];
+    heads.sort((a, b) => (FIRST.indexOf(a) + 1 || 99) - (FIRST.indexOf(b) + 1 || 99));
+    const showCat = S.cat === ALL && new Set(rows.map(r => r.doc.categoria)).size > 1;
     out.append(el("section", { class: "day" },
-      el("h2", {}, fmtDia(day), el("span", { class: "n", text: `${items.length} archivo${items.length === 1 ? "" : "s"}` })),
-      el("div", { class: "list" }, items.map(card))));
-  }
+      el("h2", {}, day ? fmtDiaTxt(day) : "Sin día", el("span", { class: "n", text: `${rows.length} partido${rows.length === 1 ? "" : "s"}` })),
+      el("div", { class: "tbl-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, showCat ? el("th", { text: "Categoría" }) : null, heads.map(h => el("th", { text: h })))),
+        el("tbody", {}, rows.map(r => el("tr", {}, showCat ? el("td", { text: r.doc.categoria }) : null, heads.map(h => el("td", { text: r.cells[h] || "" })))))))));
+  });
+
+  // Archivos originales, siempre disponibles para descargar.
+  const failed = sheets.filter(d => PARSED.get(d.id)?.status === "ok" && !PARSED.get(d.id).rows.length || PARSED.get(d.id)?.status === "err");
+  const others = inCat.filter(d => !isSheet(d));
+  out.append(el("section", { class: "day" },
+    el("h2", {}, "Archivos", el("span", { class: "n", text: `${inCat.length} archivo${inCat.length === 1 ? "" : "s"}` })),
+    others.length ? el("p", { class: "hint", text: "Los PDF e imágenes no se pueden filtrar: abrilos para ver el detalle." }) : null,
+    failed.length ? el("p", { class: "hint", text: `No se pudieron leer partidos de: ${failed.map(d => d.titulo).join(", ")}. Abrí el archivo para verlo.` }) : null,
+    el("div", { class: "list" }, [...inCat].sort((a, b) => coll.compare(a.categoria, b.categoria) || coll.compare(a.titulo, b.titulo)).map(card))));
 }
 function fillSelect(sel, allLabel, opts, key, fmt = x => x) {
   const s = $(sel);
   if (S.f[key] !== ALL && !opts.includes(S.f[key])) S.f[key] = ALL;
   s.replaceChildren(el("option", { value: ALL, text: allLabel }), ...opts.map(o => el("option", { value: o, text: fmt(o) })));
   s.value = S.f[key];
+  s.closest("label").hidden = !opts.length;
 }
-function resetF() { S.f = { dep: ALL, dia: ALL, cancha: ALL }; S.open = {}; }
+function resetF() { S.f = { dep: ALL, dia: ALL, cancha: ALL }; }
 
 function card(d) {
   const url = publicUrl(d.path);
-  const open = S.open[d.id];
-  const c = el("article", { class: "card" + (open ? " wide" : "") },
+  const p = PARSED.get(d.id);
+  const c = el("article", { class: "card" },
     el("div", { class: "card-top" }, el("span", { class: "ftype", text: typeLabel(d) }), el("h3", { text: d.titulo })),
     el("div", { class: "meta" },
-      S.cat === ALL ? el("span", { class: "tag" }, el("b", { text: d.categoria })) : null,
-      el("span", { class: "tag" }, "Dep. ", el("b", { text: d.departamental || "todas" })),
-      el("span", { class: "tag" }, "Cancha ", el("b", { text: d.cancha || "todas" }))),
+      el("span", { class: "tag" }, el("b", { text: d.categoria })),
+      p?.status === "ok" && p.rows.length ? el("span", { class: "tag" }, el("b", { text: p.rows.length }), " partidos") : null),
     isImg(d) ? el("img", { class: "thumb", src: url, alt: d.titulo, loading: "lazy" }) : null);
-  if (open) c.append(open);
   const acts = el("div", { class: "actions" });
-  if (isSheet(d)) acts.append(el("button", { class: "primary", onclick: () => toggleTable(d) }, open ? "Ocultar tabla" : "Ver tabla"));
   acts.append(el("a", { class: "btn" + (isSheet(d) ? "" : " primary"), href: url, target: "_blank", rel: "noopener", onclick: () => track("abrir", d.id) }, isSheet(d) ? "Descargar" : "Abrir"));
   acts.append(el("span", { class: "count", style: "align-self:center", text: fmtSize(d.size || 0) }));
   if (S.canEdit) {
@@ -329,37 +430,6 @@ function card(d) {
   }
   c.append(acts);
   return c;
-}
-
-/* ---------- planillas Excel / CSV ---------- */
-function sheetView(wb, idx) {
-  const name = wb.SheetNames[idx];
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, blankrows: false, defval: "" })
-    .filter(r => r.some(c => String(c).trim()));
-  const width = Math.max(0, ...rows.map(r => r.length));
-  const [head = [], ...body] = rows;
-  const pad = r => Array.from({ length: width }, (_, i) => r[i] ?? "");
-  const box = el("div", { style: "display:flex;flex-direction:column;gap:8px" });
-  if (wb.SheetNames.length > 1) box.append(el("div", { class: "sheets" }, wb.SheetNames.map((n, i) => el("button", { "aria-pressed": String(i === idx), onclick: () => { box.replaceWith(sheetView(wb, i)); } }, n))));
-  box.append(rows.length ? el("div", { class: "tbl-wrap" }, el("table", {},
-    el("thead", {}, el("tr", {}, pad(head).map(h => el("th", { text: h })))),
-    el("tbody", {}, body.map(r => el("tr", {}, pad(r).map(v => el("td", { text: v })))))))
-    : el("p", { class: "hint", text: "Esta hoja está vacía." }));
-  return box;
-}
-async function toggleTable(d) {
-  if (S.open[d.id]) { delete S.open[d.id]; render(); return; }
-  S.open[d.id] = el("p", { class: "hint", text: "Cargando tabla…" }); render();
-  track("tabla", d.id);
-  try {
-    if (!window.XLSX) throw new Error("lector");
-    const r = await fetch(publicUrl(d.path));
-    if (!r.ok) throw new Error(r.status);
-    const buf = await r.arrayBuffer();
-    const wb = ext(d.path) === "csv" ? XLSX.read(new TextDecoder().decode(buf), { type: "string" }) : XLSX.read(buf, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
-    S.open[d.id] = sheetView(wb, 0);
-  } catch (e) { S.open[d.id] = el("p", { class: "msg err", text: "No se pudo mostrar la tabla. Usá «Descargar»." }); }
-  render();
 }
 
 /* ---------- filtros ---------- */
@@ -419,7 +489,7 @@ $("#doUpload").onclick = async () => {
   const disc = $("#upDisc").value.trim(), cat = $("#upCat").value.trim();
   if (!picked.length) return msg("Elegí al menos un archivo.", "err");
   if (!disc || !cat) return msg("Completá disciplina y categoría.", "err");
-  const meta = { disciplina: disc, categoria: cat, departamental: $("#upDep").value.trim() || null, dia: $("#upDia").value || null, cancha: $("#upCancha").value.trim() || null };
+  const meta = { disciplina: disc, categoria: cat };
   const tituloManual = $("#upTitulo").value.trim();
   const btn = $("#doUpload"); btn.disabled = true;
   let ok = 0; const errs = [];
