@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fixtures de las Jornadas</title>
+<meta name="description" content="Fixtures de las jornadas para delegados, por disciplina y categoría.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<style>
+:root{
+  --bg:#EEF1EC; --surface:#FFFFFF; --ink:#13201A; --muted:#5B6B62; --line:#D3DBD5;
+  --accent:#D9481C; --accent-ink:#FFFFFF; --turf:#1F5A3E; --turf-soft:#DDEBE2; --warn:#A3261B;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0F1612; --surface:#18221C; --ink:#E6EEE8; --muted:#97A89D; --line:#2C3A32;
+  --accent:#F06A3C; --accent-ink:#1A0D07; --turf:#7FC79F; --turf-soft:#1E3227; --warn:#F08A7E; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:calc(20px + env(safe-area-inset-top,0px)) calc(48px + env(safe-area-inset-bottom,0px))}
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(30px,6vw,46px);line-height:.95;margin:0;text-transform:uppercase;letter-spacing:.01em;text-wrap:balance}
+h1 span{color:var(--accent)}
+.sub{color:var(--muted);margin:6px 0 0;max-width:60ch}
+button,.btn{font:600 14px/1 var(--body);border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--ink)}
+button:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible,[role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.primary:hover{border-color:var(--ink)}
+button:disabled{opacity:.55;cursor:default}
+.linkish{background:none;border:0;padding:0;color:var(--muted);font-weight:500;text-decoration:underline;font-size:13px}
+.disc-bar{display:flex;gap:4px;overflow-x:auto;border-bottom:3px solid var(--ink);scrollbar-width:thin}
+.disc-bar [role=tab]{font-family:var(--display);font-weight:700;font-size:20px;text-transform:uppercase;letter-spacing:.03em;border:0;border-radius:6px 6px 0 0;background:transparent;color:var(--muted);padding:10px 16px 8px;white-space:nowrap}
+.disc-bar [role=tab][aria-selected=true]{background:var(--ink);color:var(--bg)}
+.disc-bar [role=tab] small{font-family:var(--mono);font-size:12px;font-weight:400;margin-left:6px;opacity:.7}
+.cat-bar{display:flex;flex-wrap:wrap;gap:8px}
+.cat-bar [role=tab]{border-radius:999px;padding:7px 14px;font-weight:600;font-size:14px}
+.cat-bar [role=tab][aria-selected=true]{background:var(--turf);border-color:var(--turf);color:var(--bg)}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);min-width:0}
+select,input{font:16px var(--body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+.count{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.day{display:flex;flex-direction:column;gap:10px}
+.day h2{font-family:var(--display);font-weight:700;font-size:22px;text-transform:uppercase;letter-spacing:.03em;margin:8px 0 0;display:flex;align-items:baseline;gap:10px}
+.day h2 .n{font-family:var(--mono);font-size:12px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}
+.list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.card.wide{grid-column:1/-1}
+.card-top{display:flex;gap:10px;align-items:flex-start}
+.ftype{font-family:var(--mono);font-size:11px;font-weight:500;padding:4px 6px;border-radius:4px;background:var(--turf-soft);color:var(--turf);flex:none;margin-top:2px}
+.card h3{margin:0;font-size:16px;font-weight:600;line-height:1.25;overflow-wrap:anywhere}
+.meta{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:12px;border:1px solid var(--line);border-radius:4px;padding:2px 7px;color:var(--muted)}
+.tag b{color:var(--ink);font-weight:600}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+.actions button,.actions .btn{padding:8px 12px;font-size:13px}
+.thumb{width:100%;max-height:220px;object-fit:contain;border-radius:4px;background:var(--bg)}
+.confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;color:var(--warn)}
+.danger{color:var(--warn)}
+.sheets{display:flex;flex-wrap:wrap;gap:6px}
+.sheets button{padding:5px 10px;font-size:12px}
+.sheets button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;max-height:520px}
+table{border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;width:100%}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+thead th{position:sticky;top:0;background:var(--turf-soft);color:var(--turf);font-weight:600}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:8px;padding:28px 20px;color:var(--muted);text-align:center}
+.empty strong{display:block;color:var(--ink);font-family:var(--display);font-size:22px;text-transform:uppercase;margin-bottom:4px}
+.panel{background:var(--surface);border:2px solid var(--ink);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.panel h2{font-family:var(--display);font-size:24px;text-transform:uppercase;margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.drop{border:2px dashed var(--line);border-radius:8px;padding:18px;text-align:center;color:var(--muted);cursor:pointer}
+.drop.over{border-color:var(--accent);color:var(--ink)}
+.drop input{display:none}
+.files{font-family:var(--mono);font-size:12px;display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.msg{font-size:14px;font-weight:600}
+.msg.err{color:var(--warn)} .msg.ok{color:var(--turf)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:12px}
+@media (prefers-reduced-motion:no-preference){.card{transition:border-color .15s}.card:hover{border-color:var(--muted)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Fixtures de las <span>Jornadas</span></h1>
+      <p class="sub">Planillas de partidos para delegados. Elegí disciplina y categoría, y filtrá por departamental, día o cancha.</p>
+    </div>
+    <div class="row">
+      <button id="openUpload" class="primary" hidden>+ Subir fixtures</button>
+    </div>
+  </header>
+
+  <section id="loginPanel" class="panel" hidden aria-labelledby="loginTitle">
+    <h2 id="loginTitle">Acceso organización</h2>
+    <form id="loginForm" class="grid">
+      <label class="f">Email<input id="loginEmail" type="email" autocomplete="username" required></label>
+      <label class="f">Contraseña<input id="loginPass" type="password" autocomplete="current-password" required></label>
+    </form>
+    <div class="row">
+      <button id="doLogin" class="primary" form="loginForm" type="submit">Ingresar</button>
+      <button id="cancelLogin" type="button">Cerrar</button>
+      <span id="loginMsg" class="msg" role="status"></span>
+    </div>
+  </section>
+
+  <section id="uploadPanel" class="panel" hidden aria-labelledby="upTitle">
+    <h2 id="upTitle">Subir fixtures</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="fileInput" multiple>
+      <div><b>Elegí o arrastrá archivos</b> (PDF, Excel, imagen, Word…)</div>
+      <div class="files" id="fileList"></div>
+    </label>
+    <p class="hint">Los Excel y CSV además se pueden ver como tabla directo en la página. Máximo 50 MB por archivo.</p>
+    <div class="grid">
+      <label class="f">Disciplina *<input id="upDisc" list="dlDisc" placeholder="Ej.: Fútbol 11"></label>
+      <label class="f">Categoría *<input id="upCat" list="dlCat" placeholder="Ej.: Sub 14 masculino"></label>
+      <label class="f">Departamental<input id="upDep" list="dlDep" placeholder="Vacío = todas"></label>
+      <label class="f">Día<input id="upDia" type="date"></label>
+      <label class="f">Cancha<input id="upCancha" list="dlCancha" placeholder="Vacío = todas"></label>
+      <label class="f">Título (opcional)<input id="upTitulo" placeholder="Si queda vacío, el nombre del archivo"></label>
+    </div>
+    <datalist id="dlDisc"></datalist><datalist id="dlCat"></datalist><datalist id="dlDep"></datalist><datalist id="dlCancha"></datalist>
+    <div class="row">
+      <button id="doUpload" class="primary">Subir</button>
+      <button id="cancelUpload">Cerrar</button>
+      <span id="upMsg" class="msg" role="status"></span>
+    </div>
+  </section>
+
+  <nav class="disc-bar" id="discBar" role="tablist" aria-label="Disciplinas"></nav>
+  <div class="cat-bar" id="catBar" role="tablist" aria-label="Categorías"></div>
+
+  <div class="filters" id="filters" hidden>
+    <label class="f">Departamental<select id="fDep"></select></label>
+    <label class="f">Día<select id="fDia"></select></label>
+    <label class="f">Cancha<select id="fCancha"></select></label>
+    <div class="row" style="justify-content:space-between"><span class="count" id="count"></span><button id="clearF">Limpiar filtros</button></div>
+  </div>
+
+  <main id="results">
+    <div class="empty"><strong>Cargando fixtures…</strong></div>
+  </main>
+
+  <footer>
+    <span id="updated"></span>
+    <span><button id="authBtn" class="linkish">Acceso organización</button></span>
+  </footer>
+</div>
+
+<script>
+const SUPABASE_URL = "https://ifmmhvayfyokwmgxkrrp.supabase.co";
+const SUPABASE_KEY = "sb_publishable_PDPEyaXcP0h2Gf0sTYf3dQ_dqgupZBo";
+const BUCKET = "fixtures", TABLE = "fixture_files";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const $ = s => document.querySelector(s);
+const ALL = "";
+const S = { docs: [], disc: null, cat: ALL, f: { dep: ALL, dia: ALL, cancha: ALL }, session: null, canEdit: false, open: {}, confirm: null, loaded: false, error: null };
+try { const saved = JSON.parse(localStorage.getItem("fx-nav") || "{}"); S.disc = saved.disc || null; S.cat = saved.cat || ALL; } catch (e) {}
+const saveNav = () => { try { localStorage.setItem("fx-nav", JSON.stringify({ disc: S.disc, cat: S.cat })); } catch (e) {} };
+
+const coll = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+const uniq = arr => [...new Set(arr.filter(Boolean))].sort(coll.compare);
+const fmtDia = d => { if (!d) return "Sin día asignado"; const t = new Date(d + "T12:00:00"); return isNaN(t) ? d : t.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" }); };
+const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB";
+const ext = n => (String(n).split(".").pop() || "").toLowerCase();
+const isSheet = d => ["xlsx", "xls", "ods", "csv"].includes(ext(d.path));
+const isImg = d => (d.content_type || "").startsWith("image/");
+const typeLabel = d => { const x = ext(d.path); return x === "pdf" ? "PDF" : isImg(d) ? "IMG" : ["xlsx", "xls", "ods"].includes(x) ? "EXCEL" : x === "csv" ? "CSV" : ["doc", "docx"].includes(x) ? "WORD" : (x || "ARCH").toUpperCase().slice(0, 5); };
+const publicUrl = path => sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "text") n.textContent = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v !== false && v != null) n.setAttribute(k, v === true ? "" : v); }
+  for (const k of kids.flat()) if (k != null) n.append(k);
+  return n;
+}
+
+/* ---------- datos ---------- */
+async function load() {
+  const { data, error } = await sb.from(TABLE).select("*").order("created_at", { ascending: true });
+  S.loaded = true;
+  if (error) { S.error = "No se pudieron cargar los fixtures. Revisá tu conexión y recargá la página."; render(); return; }
+  S.error = null; S.docs = data || [];
+  $("#updated").textContent = "Actualizado " + new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  render();
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+
+/* ---------- render ---------- */
+function render() {
+  const docs = S.docs;
+  const discs = uniq(docs.map(d => d.disciplina));
+  if (!discs.includes(S.disc)) S.disc = discs[0] || null;
+  const inDisc = docs.filter(d => d.disciplina === S.disc);
+  const cats = uniq(inDisc.map(d => d.categoria));
+  if (S.cat !== ALL && !cats.includes(S.cat)) S.cat = ALL;
+  const inCat = inDisc.filter(d => S.cat === ALL || d.categoria === S.cat);
+
+  const db = $("#discBar"); db.replaceChildren();
+  discs.forEach(x => db.append(el("button", { role: "tab", "aria-selected": String(x === S.disc), onclick: () => { S.disc = x; S.cat = ALL; resetF(); saveNav(); render(); } }, x, el("small", { text: docs.filter(d => d.disciplina === x).length }))));
+  db.hidden = !discs.length;
+  const cb = $("#catBar"); cb.replaceChildren();
+  if (cats.length) {
+    cb.append(el("button", { role: "tab", "aria-selected": String(S.cat === ALL), onclick: () => { S.cat = ALL; resetF(); saveNav(); render(); } }, "Todas las categorías"));
+    cats.forEach(x => cb.append(el("button", { role: "tab", "aria-selected": String(x === S.cat), onclick: () => { S.cat = x; resetF(); saveNav(); render(); } }, x)));
+  }
+  cb.hidden = !cats.length;
+
+  fillSelect("#fDep", "Todas", uniq(inCat.map(d => d.departamental)), "dep");
+  fillSelect("#fDia", "Todos", uniq(inCat.map(d => d.dia)), "dia", fmtDia);
+  fillSelect("#fCancha", "Todas", uniq(inCat.map(d => d.cancha)), "cancha");
+  $("#filters").hidden = !inCat.length;
+
+  // Un fixture sin departamental o cancha cargada aplica a todas: se muestra con cualquier filtro.
+  const shown = inCat.filter(d =>
+    (S.f.dep === ALL || d.departamental === S.f.dep || !d.departamental) &&
+    (S.f.dia === ALL || d.dia === S.f.dia) &&
+    (S.f.cancha === ALL || d.cancha === S.f.cancha || !d.cancha));
+  $("#count").textContent = `${shown.length} de ${inCat.length} archivo${inCat.length === 1 ? "" : "s"}`;
+
+  for (const [id, key] of [["#dlDisc", "disciplina"], ["#dlCat", "categoria"], ["#dlDep", "departamental"], ["#dlCancha", "cancha"]])
+    $(id).replaceChildren(...uniq(docs.map(d => d[key])).map(v => el("option", { value: v })));
+
+  const out = $("#results"); out.replaceChildren();
+  if (S.error) { out.append(el("div", { class: "empty" }, el("strong", { text: "Sin conexión" }), S.error)); return; }
+  if (!S.loaded) { out.append(el("div", { class: "empty" }, el("strong", { text: "Cargando fixtures…" }))); return; }
+  if (!docs.length) {
+    out.append(el("div", { class: "empty" }, el("strong", { text: "Todavía no hay fixtures" }),
+      S.canEdit ? "Usá «Subir fixtures» para cargar el primero: elegí el archivo, la disciplina y la categoría." : "La organización todavía no cargó planillas. Volvé a mirar más tarde."));
+    return;
+  }
+  if (!shown.length) { out.append(el("div", { class: "empty" }, el("strong", { text: "Sin resultados" }), "Ningún fixture coincide con esos filtros. Probá con «Limpiar filtros».")); return; }
+
+  const byDay = {};
+  shown.forEach(d => (byDay[d.dia || ""] ||= []).push(d));
+  const days = Object.keys(byDay).sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b));
+  for (const day of days) {
+    const items = byDay[day].sort((a, b) => coll.compare(a.categoria, b.categoria) || coll.compare(a.cancha || "", b.cancha || "") || coll.compare(a.titulo, b.titulo));
+    out.append(el("section", { class: "day" },
+      el("h2", {}, fmtDia(day), el("span", { class: "n", text: `${items.length} archivo${items.length === 1 ? "" : "s"}` })),
+      el("div", { class: "list" }, items.map(card))));
+  }
+}
+function fillSelect(sel, allLabel, opts, key, fmt = x => x) {
+  const s = $(sel);
+  if (S.f[key] !== ALL && !opts.includes(S.f[key])) S.f[key] = ALL;
+  s.replaceChildren(el("option", { value: ALL, text: allLabel }), ...opts.map(o => el("option", { value: o, text: fmt(o) })));
+  s.value = S.f[key];
+}
+function resetF() { S.f = { dep: ALL, dia: ALL, cancha: ALL }; S.open = {}; }
+
+function card(d) {
+  const url = publicUrl(d.path);
+  const open = S.open[d.id];
+  const c = el("article", { class: "card" + (open ? " wide" : "") },
+    el("div", { class: "card-top" }, el("span", { class: "ftype", text: typeLabel(d) }), el("h3", { text: d.titulo })),
+    el("div", { class: "meta" },
+      S.cat === ALL ? el("span", { class: "tag" }, el("b", { text: d.categoria })) : null,
+      el("span", { class: "tag" }, "Dep. ", el("b", { text: d.departamental || "todas" })),
+      el("span", { class: "tag" }, "Cancha ", el("b", { text: d.cancha || "todas" }))),
+    isImg(d) ? el("img", { class: "thumb", src: url, alt: d.titulo, loading: "lazy" }) : null);
+  if (open) c.append(open);
+  const acts = el("div", { class: "actions" });
+  if (isSheet(d)) acts.append(el("button", { class: "primary", onclick: () => toggleTable(d) }, open ? "Ocultar tabla" : "Ver tabla"));
+  acts.append(el("a", { class: "btn" + (isSheet(d) ? "" : " primary"), href: url, target: "_blank", rel: "noopener" }, isSheet(d) ? "Descargar" : "Abrir"));
+  acts.append(el("span", { class: "count", style: "align-self:center", text: fmtSize(d.size || 0) }));
+  if (S.canEdit) {
+    if (S.confirm === d.id) {
+      acts.append(el("div", { class: "confirm" }, "¿Borrar para todos?",
+        el("button", { class: "danger", onclick: () => remove(d) }, "Sí, borrar"),
+        el("button", { onclick: () => { S.confirm = null; render(); } }, "No")));
+    } else acts.append(el("button", { class: "danger", onclick: () => { S.confirm = d.id; render(); } }, "Borrar"));
+  }
+  c.append(acts);
+  return c;
+}
+
+/* ---------- planillas Excel / CSV ---------- */
+function sheetView(wb, idx) {
+  const name = wb.SheetNames[idx];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, blankrows: false, defval: "" })
+    .filter(r => r.some(c => String(c).trim()));
+  const width = Math.max(0, ...rows.map(r => r.length));
+  const [head = [], ...body] = rows;
+  const pad = r => Array.from({ length: width }, (_, i) => r[i] ?? "");
+  const box = el("div", { style: "display:flex;flex-direction:column;gap:8px" });
+  if (wb.SheetNames.length > 1) box.append(el("div", { class: "sheets" }, wb.SheetNames.map((n, i) => el("button", { "aria-pressed": String(i === idx), onclick: () => { box.replaceWith(sheetView(wb, i)); } }, n))));
+  box.append(rows.length ? el("div", { class: "tbl-wrap" }, el("table", {},
+    el("thead", {}, el("tr", {}, pad(head).map(h => el("th", { text: h })))),
+    el("tbody", {}, body.map(r => el("tr", {}, pad(r).map(v => el("td", { text: v })))))))
+    : el("p", { class: "hint", text: "Esta hoja está vacía." }));
+  return box;
+}
+async function toggleTable(d) {
+  if (S.open[d.id]) { delete S.open[d.id]; render(); return; }
+  S.open[d.id] = el("p", { class: "hint", text: "Cargando tabla…" }); render();
+  try {
+    if (!window.XLSX) throw new Error("lector");
+    const r = await fetch(publicUrl(d.path));
+    if (!r.ok) throw new Error(r.status);
+    const buf = await r.arrayBuffer();
+    const wb = ext(d.path) === "csv" ? XLSX.read(new TextDecoder().decode(buf), { type: "string" }) : XLSX.read(buf, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
+    S.open[d.id] = sheetView(wb, 0);
+  } catch (e) { S.open[d.id] = el("p", { class: "msg err", text: "No se pudo mostrar la tabla. Usá «Descargar»." }); }
+  render();
+}
+
+/* ---------- filtros ---------- */
+$("#fDep").onchange = e => { S.f.dep = e.target.value; render(); };
+$("#fDia").onchange = e => { S.f.dia = e.target.value; render(); };
+$("#fCancha").onchange = e => { S.f.cancha = e.target.value; render(); };
+$("#clearF").onclick = () => { resetF(); render(); };
+
+/* ---------- acceso organización ---------- */
+async function refreshAuth(session) {
+  S.session = session;
+  S.canEdit = false;
+  if (session) {
+    const { data } = await sb.rpc("is_fixture_admin");
+    S.canEdit = data === true;
+  }
+  $("#authBtn").textContent = session ? `Salir (${session.user.email})` : "Acceso organización";
+  $("#openUpload").hidden = !S.canEdit || !$("#uploadPanel").hidden;
+  if (!S.canEdit) $("#uploadPanel").hidden = true;
+  if (session && !S.canEdit) { $("#loginPanel").hidden = false; $("#loginMsg").className = "msg err"; $("#loginMsg").textContent = "Este usuario no tiene permiso para subir fixtures."; }
+  render();
+}
+$("#authBtn").onclick = async () => {
+  if (S.session) { await sb.auth.signOut(); return; }
+  $("#loginPanel").hidden = false; $("#loginMsg").textContent = ""; $("#loginEmail").focus();
+};
+$("#cancelLogin").onclick = () => { $("#loginPanel").hidden = true; };
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault();
+  const m = $("#loginMsg"); m.className = "msg"; m.textContent = "Ingresando…";
+  const { error } = await sb.auth.signInWithPassword({ email: $("#loginEmail").value.trim(), password: $("#loginPass").value });
+  if (error) { m.className = "msg err"; m.textContent = "Email o contraseña incorrectos."; return; }
+  $("#loginPass").value = ""; m.textContent = "";
+  $("#loginPanel").hidden = true;
+};
+sb.auth.onAuthStateChange((_ev, session) => { setTimeout(() => refreshAuth(session), 0); });
+
+/* ---------- carga ---------- */
+let picked = [];
+function setPicked(list) {
+  picked = [...list];
+  $("#fileList").replaceChildren(...picked.map(f => el("div", { text: `${f.name} · ${fmtSize(f.size)}` })));
+}
+$("#fileInput").onchange = e => setPicked(e.target.files);
+const drop = $("#drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); setPicked(e.dataTransfer.files); });
+$("#openUpload").onclick = () => { $("#uploadPanel").hidden = false; $("#openUpload").hidden = true; if (S.disc && !$("#upDisc").value) $("#upDisc").value = S.disc; if (S.cat && !$("#upCat").value) $("#upCat").value = S.cat; $("#upDisc").focus(); };
+$("#cancelUpload").onclick = () => { $("#uploadPanel").hidden = true; $("#openUpload").hidden = !S.canEdit; };
+const msg = (t, kind = "") => { const m = $("#upMsg"); m.textContent = t; m.className = "msg " + kind; };
+const safeName = n => n.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(-120);
+
+$("#doUpload").onclick = async () => {
+  const disc = $("#upDisc").value.trim(), cat = $("#upCat").value.trim();
+  if (!picked.length) return msg("Elegí al menos un archivo.", "err");
+  if (!disc || !cat) return msg("Completá disciplina y categoría.", "err");
+  const meta = { disciplina: disc, categoria: cat, departamental: $("#upDep").value.trim() || null, dia: $("#upDia").value || null, cancha: $("#upCancha").value.trim() || null };
+  const tituloManual = $("#upTitulo").value.trim();
+  const btn = $("#doUpload"); btn.disabled = true;
+  let ok = 0; const errs = [];
+  for (const file of picked) {
+    msg(`Subiendo ${file.name}…`);
+    const path = `${crypto.randomUUID()}/${safeName(file.name)}`;
+    const base = file.name.replace(/\.[^.]+$/, "");
+    const up = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
+    if (up.error) { errs.push(`${file.name}: ${/size|large/i.test(up.error.message) ? "supera 50 MB." : "no se pudo subir."}`); continue; }
+    const titulo = tituloManual ? (picked.length > 1 ? `${tituloManual} – ${base}` : tituloManual) : base;
+    const ins = await sb.from(TABLE).insert({ ...meta, titulo, path, content_type: file.type || null, size: file.size, archivo: file.name });
+    if (ins.error) { await sb.storage.from(BUCKET).remove([path]); errs.push(`${file.name}: no se pudo registrar.`); continue; }
+    ok++;
+  }
+  btn.disabled = false;
+  if (ok) { S.disc = disc; S.cat = cat; resetF(); saveNav(); setPicked([]); $("#fileInput").value = ""; $("#upTitulo").value = ""; }
+  msg(errs.length ? `${ok} subido${ok === 1 ? "" : "s"}. ${errs.join(" ")}` : `Listo: ${ok} archivo${ok === 1 ? "" : "s"} publicado${ok === 1 ? "" : "s"}.`, errs.length ? "err" : "ok");
+  load();
+};
+
+async function remove(d) {
+  S.confirm = null;
+  const { error } = await sb.from(TABLE).delete().eq("id", d.id);
+  if (error) { $("#results").prepend(el("p", { class: "msg err", text: "No se pudo borrar. Volvé a ingresar e intentá de nuevo." })); return; }
+  await sb.storage.from(BUCKET).remove([d.path]);
+  load();
+}
+
+render();
+load();
+</script>
+</body>
+</html>
