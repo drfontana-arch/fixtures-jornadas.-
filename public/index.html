@@ -563,7 +563,7 @@ async function replaceFile(d, file) {
   const path = `${crypto.randomUUID()}/${safeName(file.name)}`;
   const up = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
   if (!up.error) {
-    const { error } = await sb.from(TABLE).update({ path, content_type: file.type || null, size: file.size, archivo: file.name }).eq("id", d.id);
+    const { error } = await sb.from(TABLE).update({ titulo: file.name.replace(/\.[^.]+$/, ""), path, content_type: file.type || null, size: file.size, archivo: file.name }).eq("id", d.id);
     if (error) await sb.storage.from(BUCKET).remove([path]);
     else { await sb.storage.from(BUCKET).remove([d.path]); PARSED.delete(d.id); }
   }
