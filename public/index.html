@@ -106,6 +106,22 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .annex-txt{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .annex-txt a{color:var(--ink);font-weight:600;overflow-wrap:anywhere}
 .add-note{align-self:flex-start;padding:7px 12px;font-size:13px;border-style:dashed}
+.ins-callout{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:var(--turf-soft);border-radius:8px;padding:12px 14px;font-size:14px}
+.ins-disc{display:flex;flex-direction:column;gap:8px}
+.ins-disc h3{font-family:var(--display);font-size:22px;text-transform:uppercase;margin:6px 0 0}
+.codes td{white-space:nowrap}
+.code{font-family:var(--mono);font-weight:500;letter-spacing:.12em}
+.prev-dep{display:flex;flex-wrap:wrap;gap:6px}
+@media print{
+  body{background:#fff;color:#000;padding:0}
+  .wrap>*:not(#insPanel){display:none!important}
+  #insPanel{border:0;padding:0}
+  .no-print{display:none!important}
+  .tbl-wrap{max-height:none;overflow:visible;border:0}
+  th,td{border-bottom:1px solid #999;color:#000}
+  thead th{background:#eee;color:#000}
+  .ins-disc{break-inside:avoid-page}
+}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .tile{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:2px;min-width:0}
 .tile .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
@@ -142,10 +158,43 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;color:v
       <p class="sub">Página de consulta exclusiva para delegados de deportes de los Colegios de Magistrados y Funcionarios, Asociaciones o Uniones Departamentales. <strong>Los fixtures publicados son provisionales y sujetos a revisión.</strong></p>
     </div>
     <div class="row">
+      <button id="openIns" aria-expanded="false">Inscriptos de mi delegación</button>
+      <button id="openInsAdmin" hidden aria-expanded="false">Cargar inscriptos</button>
       <button id="openStats" hidden aria-expanded="false">Estadísticas</button>
       <button id="openUpload" class="primary" hidden>+ Subir fixtures</button>
     </div>
   </header>
+
+  <section id="insPanel" class="panel" hidden aria-labelledby="insTitle">
+    <div class="row no-print" style="justify-content:space-between">
+      <h2 id="insTitle">Inscriptos de mi delegación</h2>
+      <button id="insClose">Cerrar</button>
+    </div>
+    <form id="insForm" class="row no-print" autocomplete="off">
+      <label class="f" style="flex:1 1 200px">Código de tu delegación
+        <input id="insCode" maxlength="12" placeholder="Ej.: K7PX3M" style="text-transform:uppercase;font-family:var(--mono);letter-spacing:.15em">
+      </label>
+      <button class="primary" type="submit" style="align-self:flex-end">Ver inscriptos</button>
+    </form>
+    <p class="hint no-print" id="insHint"></p>
+    <div id="insBody"></div>
+  </section>
+
+  <section id="insAdmin" class="panel" hidden aria-labelledby="iaTitle">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="iaTitle">Cargar inscriptos por delegación</h2>
+      <button id="iaClose">Cerrar</button>
+    </div>
+    <div class="grid">
+      <label class="f">Disciplina *<input id="iaDisc" list="dlInsDisc" placeholder="Ej.: Natación"></label>
+      <label class="f">Archivo (Excel o CSV) *<input id="iaFile" type="file" accept=".xlsx,.xls,.ods,.csv"></label>
+    </div>
+    <datalist id="dlInsDisc"></datalist>
+    <p class="hint">La planilla necesita una columna con la departamental (o una hoja por departamental). Al publicar se reemplazan los inscriptos anteriores de esa disciplina.</p>
+    <div id="iaPreview"></div>
+    <div id="iaLoaded"></div>
+    <div id="iaCodes"></div>
+  </section>
 
   <section id="statsPanel" class="panel" hidden aria-labelledby="stTitle">
     <div class="row" style="justify-content:space-between">
@@ -381,6 +430,10 @@ function render() {
     return;
   }
 
+  if (isInsDisc(S.disc)) out.append(el("div", { class: "ins-callout" },
+    el("span", {}, "Los inscriptos de esta disciplina se consultan con el código de tu delegación."),
+    el("button", { class: "primary", onclick: openInsPanel }, "Ver inscriptos de mi delegación")));
+
   // Leer las planillas de la pestaña actual (una sola vez cada una).
   const sheets = inCat.filter(isSheet);
   sheets.forEach(d => { if (!PARSED.has(d.id)) parseDoc(d); });
@@ -589,7 +642,8 @@ async function refreshAuth(session) {
   $("#authBtn").textContent = session ? `Salir (${session.user.email})` : "Acceso organización";
   $("#openUpload").hidden = !S.canEdit || !$("#uploadPanel").hidden;
   $("#openStats").hidden = !S.canEdit;
-  if (!S.canEdit) { $("#uploadPanel").hidden = true; $("#statsPanel").hidden = true; }
+  $("#openInsAdmin").hidden = !S.canEdit;
+  if (!S.canEdit) { $("#uploadPanel").hidden = true; $("#statsPanel").hidden = true; $("#insAdmin").hidden = true; }
   authReady();
   if (session && !S.canEdit) { $("#loginPanel").hidden = false; $("#loginMsg").className = "msg err"; $("#loginMsg").textContent = "Este usuario no tiene permiso para subir fixtures."; }
   render();
@@ -677,7 +731,10 @@ setTimeout(authReady, 4000); // si la sesión tarda, igual se registra la visita
 
 /* ---------- estadísticas (solo organización) ---------- */
 const ST = { rows: [], loaded: false };
-const TIPO_TXT = { visita: "Entró al sitio", abrir: "Abrió", tabla: "Vio la tabla de" };
+const TIPO_TXT = { visita: "Entró al sitio", abrir: "Abrió", tabla: "Vio la tabla de", inscriptos: "Consultó inscriptos de", codigo_erroneo: "Probó un código incorrecto" };
+const queTxt = r => r.tipo === "visita" || r.tipo === "codigo_erroneo" ? TIPO_TXT[r.tipo]
+  : r.tipo === "inscriptos" ? `${TIPO_TXT.inscriptos} ${r.categoria || "?"}`
+  : `${TIPO_TXT[r.tipo]} «${r.fixture_titulo || "archivo borrado"}»`;
 $("#openStats").onclick = () => {
   const p = $("#statsPanel"); p.hidden = !p.hidden;
   $("#openStats").setAttribute("aria-expanded", String(!p.hidden));
@@ -769,7 +826,9 @@ function activityChart(rows) {
 function renderStats() {
   const rows = ST.rows;
   const visits = rows.filter(r => r.tipo === "visita");
-  const opens = rows.filter(r => r.tipo !== "visita");
+  const opens = rows.filter(r => r.tipo === "abrir" || r.tipo === "tabla");
+  const consultas = rows.filter(r => r.tipo === "inscriptos");
+  const erroneos = rows.filter(r => r.tipo === "codigo_erroneo").length;
   const uniques = new Set(rows.map(r => r.visitante).filter(Boolean)).size;
   const cel = visits.filter(r => r.dispositivo === "Celular").length;
   const tile = (k, v, s) => el("div", { class: "tile" }, el("span", { class: "k", text: k }), el("span", { class: "v", text: v }), s ? el("span", { class: "s", text: s }) : null);
@@ -788,13 +847,15 @@ function renderStats() {
       el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Archivos más abiertos" }), rankList(countBy(opens, r => r.fixture_titulo), 8, fileSub)),
       el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Desde dónde" }), rankList(countBy(visits, lugar))),
       el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Cómo llegaron" }), rankList(countBy(visits, r => r.origen || "Directo"))),
-      el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Dispositivo" }), rankList(countBy(visits, r => [r.dispositivo, r.sistema].filter(Boolean).join(" · "))))),
+      el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Dispositivo" }), rankList(countBy(visits, r => [r.dispositivo, r.sistema].filter(Boolean).join(" · ")))),
+      el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Consultas de inscriptos" }), rankList(countBy(consultas, r => r.categoria), 22),
+        erroneos ? el("p", { class: "hint", text: `${erroneos} intento${erroneos === 1 ? "" : "s"} con código incorrecto.` }) : null)),
     el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Últimos movimientos" }),
       recent.length ? el("div", { class: "tbl-wrap" }, el("table", { class: "log" },
         el("thead", {}, el("tr", {}, ["Cuándo", "Qué", "Desde dónde", "Dispositivo", "Llegó por"].map(h => el("th", { text: h })))),
         el("tbody", {}, recent.map(r => el("tr", {},
           el("td", { text: fmtHora(r.created_at) }),
-          el("td", { text: r.tipo === "visita" ? TIPO_TXT.visita : `${TIPO_TXT[r.tipo]} «${r.fixture_titulo || "archivo borrado"}»` }),
+          el("td", { text: queTxt(r) }),
           el("td", { text: lugar(r) }),
           el("td", { text: [r.dispositivo, r.navegador].filter(Boolean).join(" · ") }),
           el("td", { text: r.origen || "Directo" })))))) : el("p", { class: "hint", text: "Todavía no hay movimientos en este período." }),
@@ -808,6 +869,173 @@ $("#stCsv").onclick = () => {
   const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: `estadisticas-fixtures-${new Date().toISOString().slice(0, 10)}.csv` });
   document.body.append(a); a.click(); a.remove();
 };
+
+/* ---------- inscriptos por delegación (con código) ---------- */
+const CONTACTO = "la organización (pedilo por privado)";
+const INS_DISC = ["Tiro", "Ajedrez", "Travesía 4x4", "Pesca", "Maratón y Caminata", "Patín Carrera", "Natación"];
+const DEPS = ["Avellaneda-Lanús", "Azul", "Bahía Blanca", "Dolores", "Junín", "Justicia Nacional", "La Matanza", "La Plata", "Lomas de Zamora", "Mar del Plata", "Mercedes", "Moreno-Gral. Rodríguez", "Morón", "Nacional (invitado)", "Necochea", "Pergamino", "Quilmes", "San Isidro", "San Martín", "San Nicolás", "Trenque Lauquen", "Zárate-Campana"];
+const key = s => norm(s).replace(/[^a-z0-9]/g, "");
+const isInsDisc = name => { const k = key(name); return INS_DISC.some(d => { const x = key(d); return k === x || k.includes(x) || x.includes(k) || (k.includes("maraton") && x.includes("maraton")) || (k.includes("travesia") && x.includes("travesia")) || (k.includes("patin") && x.includes("patin")); }); };
+// Reconoce la departamental aunque esté escrita distinto ("Avellaneda Lanus", "DEPTO. MORON", "Moreno").
+function matchDep(v) {
+  const k = key(v).replace(/^(departamental|depto|dpto|delegacion|colegio)/, "");
+  if (!k) return null;
+  return DEPS.find(d => key(d) === k) || DEPS.find(d => k.includes(key(d))) || DEPS.find(d => key(d).startsWith(k) && k.length >= 4) || DEPS.find(d => k.length >= 5 && key(d).includes(k)) || null;
+}
+$("#dlInsDisc").replaceChildren(...INS_DISC.map(v => el("option", { value: v })));
+$("#insHint").textContent = `Cada delegación ve solo sus inscriptos. Pedí el código de tu delegación a ${CONTACTO}.`;
+
+function openInsPanel() {
+  const p = $("#insPanel"); p.hidden = false; $("#openIns").setAttribute("aria-expanded", "true");
+  let saved = null; try { saved = localStorage.getItem("fx-code"); } catch (e) {}
+  if (saved && !$("#insBody").childElementCount) { $("#insCode").value = saved; consultarIns(saved); }
+  p.scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => $("#insCode").focus(), 300);
+}
+$("#openIns").onclick = () => { $("#insPanel").hidden ? openInsPanel() : $("#insClose").click(); };
+$("#insClose").onclick = () => { $("#insPanel").hidden = true; $("#openIns").setAttribute("aria-expanded", "false"); };
+$("#insForm").onsubmit = e => { e.preventDefault(); consultarIns($("#insCode").value); };
+
+async function consultarIns(code) {
+  code = String(code || "").trim().toUpperCase();
+  const body = $("#insBody");
+  if (!code) { body.replaceChildren(el("p", { class: "msg err", text: "Escribí el código de tu delegación." })); return; }
+  body.replaceChildren(el("p", { class: "hint", text: "Buscando…" }));
+  const { data, error } = await sb.rpc("get_inscriptos", { p_code: code });
+  if (error) { body.replaceChildren(el("p", { class: "msg err", text: "No se pudo consultar. Revisá tu conexión e intentá de nuevo." })); return; }
+  if (!data) { body.replaceChildren(el("p", { class: "msg err", text: "Ese código no es válido. Revisalo o pedilo de nuevo." })); try { localStorage.removeItem("fx-code"); } catch (e) {} return; }
+  try { localStorage.setItem("fx-code", code); } catch (e) {}
+  const con = data.disciplinas.filter(d => d.filas.length), sin = data.disciplinas.filter(d => !d.filas.length);
+  const total = con.reduce((s, d) => s + d.filas.length, 0);
+  body.replaceChildren(el("div", { style: "display:flex;flex-direction:column;gap:16px" },
+    el("div", { class: "row", style: "justify-content:space-between" },
+      el("div", {}, el("div", { class: "notes-h", text: "Delegación" }), el("div", { class: "st-h", style: "font-size:28px", text: data.departamental }),
+        el("div", { class: "hint", text: `${total} ${total === 1 ? "inscripción" : "inscripciones"} en ${con.length} disciplina${con.length === 1 ? "" : "s"} · consultado ${fmtNota(new Date())}` })),
+      el("div", { class: "row no-print" },
+        el("button", { class: "primary", onclick: () => window.print() }, "Imprimir o guardar PDF"),
+        el("button", { onclick: () => { try { localStorage.removeItem("fx-code"); } catch (e) {} $("#insCode").value = ""; body.replaceChildren(); } }, "Salir"))),
+    !data.disciplinas.length ? el("p", { class: "hint", text: "Todavía no se cargaron inscriptos. Volvé a consultar más tarde." }) : null,
+    con.map(d => el("div", { class: "ins-disc", id: "ins-" + key(d.disciplina) },
+      el("h3", {}, d.disciplina, el("span", { class: "n", style: "font:12px var(--mono);color:var(--muted);margin-left:8px", text: `${d.filas.length} · actualizado ${fmtNota(d.actualizado)}` })),
+      el("div", { class: "tbl-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, d.columnas.map(c => el("th", { text: c })))),
+        el("tbody", {}, d.filas.map(f => el("tr", {}, d.columnas.map(c => el("td", { text: f[c] ?? "" }))))))))),
+    sin.length ? el("p", { class: "hint", text: `Sin inscriptos de tu delegación en: ${sin.map(d => d.disciplina).join(", ")}.` }) : null));
+}
+
+/* ---------- carga de inscriptos (organización) ---------- */
+const IA = { rows: null };
+$("#openInsAdmin").onclick = () => { const p = $("#insAdmin"); p.hidden = !p.hidden; $("#openInsAdmin").setAttribute("aria-expanded", String(!p.hidden)); if (!p.hidden) { loadInsAdmin(); p.scrollIntoView({ behavior: "smooth" }); } };
+$("#iaClose").onclick = () => { $("#insAdmin").hidden = true; $("#openInsAdmin").setAttribute("aria-expanded", "false"); };
+$("#iaFile").onchange = async e => { const f = e.target.files[0]; if (f) await previewIns(f); };
+
+async function previewIns(file) {
+  const out = $("#iaPreview");
+  out.replaceChildren(el("p", { class: "hint", text: "Leyendo planilla…" }));
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = ext(file.name) === "csv" ? XLSX.read(new TextDecoder().decode(buf), { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
+    const DEPCOL = /departamental|delegacion|depto|dpto|colegio|asociacion|union/;
+    let columnas = [], rows = [], bad = [];
+    for (const sn of wb.SheetNames) {
+      const grid = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: false, blankrows: false, defval: "" })
+        .map(r => r.map(c => String(c).trim())).filter(r => r.some(Boolean));
+      if (!grid.length) continue;
+      // Encabezado: entre las primeras 15 filas, la que nombra la departamental o la primera con 3+ celdas.
+      let hi = grid.slice(0, 15).findIndex(r => r.some(c => DEPCOL.test(norm(c))));
+      if (hi < 0) hi = Math.max(0, grid.slice(0, 15).findIndex(r => r.filter(Boolean).length >= 3));
+      const head = grid[hi].map((h, i) => h || `Col ${i + 1}`);
+      let depIdx = head.findIndex(h => DEPCOL.test(norm(h)));
+      const sheetDep = matchDep(sn);
+      if (depIdx < 0 && !sheetDep) {
+        // Sin encabezado claro: la columna con más valores que coinciden con departamentales.
+        let best = 0;
+        head.forEach((_, i) => { const n = grid.slice(hi + 1).filter(r => matchDep(r[i])).length; if (n > best) { best = n; depIdx = i; } });
+      }
+      head.forEach((h, i) => { if (i !== depIdx && !columnas.includes(h)) columnas.push(h); });
+      grid.slice(hi + 1).forEach(r => {
+        if (norm(r.join("|")) === norm(grid[hi].join("|"))) return;
+        const raw = depIdx >= 0 ? r[depIdx] : sn;
+        const dep = depIdx >= 0 ? matchDep(raw) : sheetDep;
+        const fila = {};
+        head.forEach((h, i) => { if (i !== depIdx && r[i]) fila[h] = r[i]; });
+        if (!Object.keys(fila).length) return;
+        if (dep) rows.push({ departamental: dep, fila }); else bad.push(raw || "(vacío)");
+      });
+    }
+    columnas = columnas.filter(c => rows.some(r => r.fila[c]));
+    IA.rows = rows; IA.columnas = columnas; IA.archivo = file.name;
+    const porDep = DEPS.map(d => [d, rows.filter(r => r.departamental === d).length]);
+    const badU = [...new Set(bad)];
+    out.replaceChildren(el("div", { class: "note", style: "gap:10px" },
+      el("div", { class: "notes-h", text: `Vista previa · ${rows.length} inscriptos reconocidos` }),
+      el("div", { class: "hint", text: "Columnas que verá cada delegado: " + (columnas.join(" · ") || "ninguna") }),
+      el("div", { class: "prev-dep" }, porDep.map(([d, n]) => el("span", { class: "tag", style: n ? "" : "opacity:.55" }, d + " ", el("b", { text: n })))),
+      badU.length ? el("p", { class: "msg err", text: `${bad.length} fila${bad.length === 1 ? "" : "s"} sin departamental reconocida (no se publican): ${badU.slice(0, 8).join(", ")}${badU.length > 8 ? "…" : ""}` }) : null,
+      el("div", { class: "row" },
+        el("button", { class: "primary", disabled: !rows.length, onclick: publishIns }, "Publicar inscriptos"),
+        el("span", { id: "iaMsg", class: "msg" }))));
+  } catch (e) { out.replaceChildren(el("p", { class: "msg err", text: "No se pudo leer el archivo. Probá guardarlo como .xlsx." })); }
+}
+
+async function publishIns() {
+  const disc = $("#iaDisc").value.trim(), m = $("#iaMsg");
+  if (!disc) { m.className = "msg err"; m.textContent = "Elegí la disciplina."; return; }
+  m.className = "msg"; m.textContent = "Publicando…";
+  const up = await sb.from("fixture_ins_cargas").upsert({ disciplina: disc, columnas: IA.columnas, archivo: IA.archivo, updated_at: new Date().toISOString() });
+  if (up.error) { m.className = "msg err"; m.textContent = "No se pudo publicar. Volvé a ingresar."; return; }
+  await sb.from("fixture_inscriptos").delete().eq("disciplina", disc);
+  const rows = IA.rows.map((r, i) => ({ disciplina: disc, departamental: r.departamental, orden: i, fila: r.fila }));
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await sb.from("fixture_inscriptos").insert(rows.slice(i, i + 500));
+    if (error) { m.className = "msg err"; m.textContent = "Se cortó la carga. Volvé a publicar el archivo."; return; }
+  }
+  m.className = "msg ok"; m.textContent = `Publicados ${rows.length} inscriptos de ${disc}.`;
+  $("#iaFile").value = ""; IA.rows = null;
+  loadInsAdmin();
+}
+
+async function loadInsAdmin() {
+  const [cargas, ins, codes] = await Promise.all([
+    sb.from("fixture_ins_cargas").select("*").order("disciplina"),
+    sb.from("fixture_inscriptos").select("disciplina,departamental").limit(20000),
+    sb.from("fixture_codes").select("*").order("departamental"),
+  ]);
+  const count = (disc, dep) => (ins.data || []).filter(r => r.disciplina === disc && (!dep || r.departamental === dep)).length;
+  $("#iaLoaded").replaceChildren(el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Disciplinas cargadas" }),
+    (cargas.data || []).length ? el("div", { class: "tbl-wrap" }, el("table", {},
+      el("thead", {}, el("tr", {}, ["Disciplina", "Inscriptos", "Delegaciones", "Actualizado", ""].map(h => el("th", { text: h })))),
+      el("tbody", {}, cargas.data.map(c => el("tr", {},
+        el("td", { text: c.disciplina }), el("td", { text: count(c.disciplina) }),
+        el("td", { text: new Set((ins.data || []).filter(r => r.disciplina === c.disciplina).map(r => r.departamental)).size }),
+        el("td", { text: fmtNota(c.updated_at) }),
+        el("td", {}, S.confirm === "ins:" + c.disciplina
+          ? el("span", { class: "confirm" }, "¿Borrar?", el("button", { class: "linkish danger", onclick: async () => { S.confirm = null; await sb.from("fixture_ins_cargas").delete().eq("disciplina", c.disciplina); loadInsAdmin(); } }, "Sí"), el("button", { class: "linkish", onclick: () => { S.confirm = null; loadInsAdmin(); } }, "No"))
+          : el("button", { class: "linkish danger", onclick: () => { S.confirm = "ins:" + c.disciplina; loadInsAdmin(); } }, "Borrar")))))))
+      : el("p", { class: "hint", text: "Todavía no se cargó ninguna disciplina." })));
+
+  const link = location.origin + "/?utm_source=codigo#inscriptos";
+  const msgFor = c => `Hola! Este es el código de ${c.departamental} para ver sus inscriptos en las Jornadas: ${c.code}\nIngresá en ${link} y tocá «Inscriptos de mi delegación».`;
+  $("#iaCodes").replaceChildren(el("div", { class: "st-block" }, el("h3", { class: "st-h", text: "Códigos por delegación" }),
+    el("p", { class: "hint", text: "Pasá cada código por privado. «Copiar mensaje» copia un texto listo para WhatsApp. «Código nuevo» invalida el anterior." }),
+    el("div", { class: "tbl-wrap" }, el("table", { class: "codes" },
+      el("thead", {}, el("tr", {}, ["Delegación", "Código", "Inscriptos", ""].map(h => el("th", { text: h })))),
+      el("tbody", {}, (codes.data || []).map(c => el("tr", {},
+        el("td", { text: c.departamental }), el("td", { class: "code", text: c.code }),
+        el("td", { text: count(null, c.departamental) || "–" }),
+        el("td", {}, el("span", { class: "row" },
+          el("button", { class: "linkish", onclick: async ev => { try { await navigator.clipboard.writeText(msgFor(c)); ev.target.textContent = "¡Copiado!"; } catch (e) { ev.target.textContent = "No se pudo copiar"; } setTimeout(() => { ev.target.textContent = "Copiar mensaje"; }, 2000); } }, "Copiar mensaje"),
+          S.confirm === "code:" + c.departamental
+            ? el("span", { class: "confirm" }, "¿Cambiar?", el("button", { class: "linkish danger", onclick: () => newCode(c) }, "Sí"), el("button", { class: "linkish", onclick: () => { S.confirm = null; loadInsAdmin(); } }, "No"))
+            : el("button", { class: "linkish", onclick: () => { S.confirm = "code:" + c.departamental; loadInsAdmin(); } }, "Código nuevo"))))))))));
+}
+async function newCode(c) {
+  S.confirm = null;
+  const { data } = await sb.rpc("fixture_new_code");
+  if (data) await sb.from("fixture_codes").update({ code: data, created_at: new Date().toISOString() }).eq("departamental", c.departamental);
+  loadInsAdmin();
+}
+if (location.hash === "#inscriptos") setTimeout(openInsPanel, 300);
 
 render();
 load();
