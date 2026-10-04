@@ -87,6 +87,21 @@ thead th{position:sticky;top:0;background:var(--turf-soft);color:var(--turf);fon
 .msg{font-size:14px;font-weight:600}
 .msg.err{color:var(--warn)} .msg.ok{color:var(--turf)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+textarea{font:15px/1.4 var(--body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0;resize:vertical}
+textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notes{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:10px}
+.notes-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.notes-h .n{font-family:var(--mono);letter-spacing:0}
+.note{display:flex;flex-direction:column;gap:6px;background:var(--bg);border-radius:6px;padding:10px}
+.nrow{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px;align-items:baseline}
+.nrow p{margin:0;font-size:14px;overflow-wrap:anywhere;white-space:pre-line}
+.nlab{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.nlab.rec{color:var(--accent)} .nlab.cor{color:var(--turf)}
+.pend{font-size:12px;font-weight:600;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:1px 8px}
+.nmeta{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.nmeta .row{gap:12px}
+.linkish.danger{color:var(--warn)}
+.add-note{align-self:flex-start;padding:7px 12px;font-size:13px;border-style:dashed}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .tile{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:2px;min-width:0}
 .tile .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
@@ -210,7 +225,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const $ = s => document.querySelector(s);
 const ALL = "";
-const S = { docs: [], disc: null, cat: ALL, f: { dep: ALL, dia: ALL, cancha: ALL }, session: null, canEdit: false, open: {}, confirm: null, loaded: false, error: null };
+const S = { docs: [], notes: [], noteEdit: null, noteConfirm: null, replacing: null, disc: null, cat: ALL, f: { dep: ALL, dia: ALL, cancha: ALL }, session: null, canEdit: false, open: {}, confirm: null, loaded: false, error: null };
 try { const saved = JSON.parse(localStorage.getItem("fx-nav") || "{}"); S.disc = saved.disc || null; S.cat = saved.cat || ALL; } catch (e) {}
 const saveNav = () => { try { localStorage.setItem("fx-nav", JSON.stringify({ disc: S.disc, cat: S.cat })); } catch (e) {} };
 
@@ -232,10 +247,13 @@ function el(tag, attrs = {}, ...kids) {
 
 /* ---------- datos ---------- */
 async function load() {
-  const { data, error } = await sb.from(TABLE).select("*").order("created_at", { ascending: true });
+  const [{ data, error }, notes] = await Promise.all([
+    sb.from(TABLE).select("*").order("created_at", { ascending: true }),
+    sb.from("fixture_notes").select("*").order("created_at", { ascending: true }),
+  ]);
   S.loaded = true;
   if (error) { S.error = "No se pudieron cargar los fixtures. Revisá tu conexión y recargá la página."; render(); return; }
-  S.error = null; S.docs = data || [];
+  S.error = null; S.docs = data || []; S.notes = notes.data || [];
   render();
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
@@ -398,6 +416,11 @@ function render() {
     el("h2", {}, "Archivos", el("span", { class: "n", text: `${inCat.length} archivo${inCat.length === 1 ? "" : "s"}` })),
     failed.length ? el("p", { class: "hint", text: `No se pudieron leer partidos de: ${failed.map(d => d.titulo).join(", ")}. Abrí el archivo para verlo.` }) : null,
     el("div", { class: "list" }, [...inCat].sort((a, b) => coll.compare(a.categoria, b.categoria) || coll.compare(a.titulo, b.titulo)).map(card))));
+
+  // Reclamos de archivos que ya no están (borrados): siguen visibles en su disciplina y categoría.
+  const ids = new Set(docs.map(d => d.id));
+  const orphans = S.notes.filter(n => (!n.fixture_id || !ids.has(n.fixture_id)) && n.disciplina === S.disc && (S.cat === ALL || n.categoria === S.cat));
+  if (orphans.length) out.append(el("section", { class: "day" }, el("div", { class: "card" }, notesBlock(orphans, null, "Reclamos de archivos anteriores"))));
 }
 function fillSelect(sel, allLabel, opts, key, fmt = x => x) {
   const s = $(sel);
@@ -421,6 +444,8 @@ function card(d) {
   acts.append(el("a", { class: "btn" + (isSheet(d) ? "" : " primary"), href: url, target: "_blank", rel: "noopener", onclick: () => track("abrir", d.id) }, isSheet(d) ? "Descargar" : "Abrir"));
   acts.append(el("span", { class: "count", style: "align-self:center", text: fmtSize(d.size || 0) }));
   if (S.canEdit) {
+    const rep = el("input", { type: "file", hidden: true, onchange: e => e.target.files[0] && replaceFile(d, e.target.files[0]) });
+    acts.append(rep, el("button", { onclick: () => rep.click(), title: "Sube la versión corregida y conserva los reclamos" }, S.replacing === d.id ? "Subiendo…" : "Reemplazar"));
     if (S.confirm === d.id) {
       acts.append(el("div", { class: "confirm" }, "¿Borrar para todos?",
         el("button", { class: "danger", onclick: () => remove(d) }, "Sí, borrar"),
@@ -428,7 +453,84 @@ function card(d) {
     } else acts.append(el("button", { class: "danger", onclick: () => { S.confirm = d.id; render(); } }, "Borrar"));
   }
   c.append(acts);
+  const mine = S.notes.filter(n => n.fixture_id === d.id);
+  const notes = notesBlock(mine, d);
+  if (notes) c.append(notes);
+  if (mine.length || S.noteEdit?.fixtureId === d.id) c.classList.add("wide");
   return c;
+}
+
+/* ---------- reclamos y correcciones ---------- */
+const fmtNota = t => new Date(t).toLocaleString("es-AR", { weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+function notesBlock(list, d, titulo = "Reclamos y correcciones") {
+  const editingHere = S.noteEdit && (d ? S.noteEdit.fixtureId === d.id : S.noteEdit.fixtureId === null);
+  if (!list.length && !S.canEdit) return null;
+  const box = el("div", { class: "notes" });
+  if (list.length) box.append(el("div", { class: "notes-h" }, titulo, el("span", { class: "n", text: ` ${list.length}` })));
+  list.forEach(n => {
+    if (editingHere && S.noteEdit.noteId === n.id) { box.append(noteForm()); return; }
+    box.append(el("div", { class: "note" },
+      el("div", { class: "nrow" }, el("span", { class: "nlab rec", text: "Reclamo" }), el("p", { text: n.reclamo })),
+      el("div", { class: "nrow" }, el("span", { class: "nlab cor", text: "Corrección" }),
+        n.correccion ? el("p", { text: n.correccion }) : el("p", {}, el("span", { class: "pend", text: "Pendiente" }))),
+      el("div", { class: "nmeta" }, el("span", { text: fmtNota(n.updated_at || n.created_at) }),
+        S.canEdit ? el("span", { class: "row" },
+          el("button", { class: "linkish", onclick: () => openNote(d, n) }, "Editar"),
+          S.noteConfirm === n.id
+            ? el("span", { class: "confirm" }, "¿Borrar?", el("button", { class: "linkish danger", onclick: () => deleteNote(n) }, "Sí"), el("button", { class: "linkish", onclick: () => { S.noteConfirm = null; render(); } }, "No"))
+            : el("button", { class: "linkish danger", onclick: () => { S.noteConfirm = n.id; render(); } }, "Borrar")) : null)));
+  });
+  if (S.canEdit && d) {
+    if (editingHere && !S.noteEdit.noteId) box.append(noteForm());
+    else box.append(el("button", { class: "add-note", onclick: () => openNote(d, null) }, "+ Agregar reclamo"));
+  }
+  return box;
+}
+function openNote(d, n) {
+  S.noteEdit = { fixtureId: d ? d.id : null, noteId: n?.id || null, doc: d, reclamo: n?.reclamo || "", correccion: n?.correccion || "", msg: "" };
+  render();
+  setTimeout(() => document.getElementById("noteRec")?.focus(), 0);
+}
+function noteForm() {
+  const e = S.noteEdit;
+  return el("div", { class: "note note-form" },
+    el("label", { class: "f" }, "Reclamo *", el("textarea", { id: "noteRec", rows: 2, placeholder: "Qué se reclamó o qué estaba mal", oninput: ev => { e.reclamo = ev.target.value; } }, e.reclamo)),
+    el("label", { class: "f" }, "Corrección", el("textarea", { id: "noteCor", rows: 2, placeholder: "Qué se corrigió. Si queda vacío figura como pendiente", oninput: ev => { e.correccion = ev.target.value; } }, e.correccion)),
+    el("div", { class: "row" },
+      el("button", { class: "primary", onclick: saveNote }, e.noteId ? "Guardar cambios" : "Agregar"),
+      el("button", { onclick: () => { S.noteEdit = null; render(); } }, "Cancelar"),
+      e.msg ? el("span", { class: "msg err", text: e.msg }) : null));
+}
+async function saveNote() {
+  const e = S.noteEdit;
+  const reclamo = e.reclamo.trim(), correccion = e.correccion.trim() || null;
+  if (!reclamo) { e.msg = "Escribí el reclamo."; render(); return; }
+  const now = new Date().toISOString();
+  const res = e.noteId
+    ? await sb.from("fixture_notes").update({ reclamo, correccion, updated_at: now }).eq("id", e.noteId)
+    : await sb.from("fixture_notes").insert({ fixture_id: e.doc.id, disciplina: e.doc.disciplina, categoria: e.doc.categoria, reclamo, correccion });
+  if (res.error) { e.msg = "No se pudo guardar. Volvé a ingresar e intentá de nuevo."; render(); return; }
+  S.noteEdit = null;
+  load();
+}
+async function deleteNote(n) {
+  S.noteConfirm = null;
+  const { error } = await sb.from("fixture_notes").delete().eq("id", n.id);
+  if (error) $("#results").prepend(el("p", { class: "msg err", text: "No se pudo borrar el reclamo." }));
+  load();
+}
+async function replaceFile(d, file) {
+  S.replacing = d.id; render();
+  const path = `${crypto.randomUUID()}/${safeName(file.name)}`;
+  const up = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
+  if (!up.error) {
+    const { error } = await sb.from(TABLE).update({ path, content_type: file.type || null, size: file.size, archivo: file.name }).eq("id", d.id);
+    if (error) await sb.storage.from(BUCKET).remove([path]);
+    else { await sb.storage.from(BUCKET).remove([d.path]); PARSED.delete(d.id); }
+  }
+  S.replacing = null;
+  if (up.error) $("#results").prepend(el("p", { class: "msg err", text: `No se pudo reemplazar ${d.titulo}.` }));
+  load();
 }
 
 /* ---------- filtros ---------- */
