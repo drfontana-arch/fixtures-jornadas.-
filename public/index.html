@@ -935,7 +935,8 @@ async function previewIns(file) {
   try {
     const buf = await file.arrayBuffer();
     const wb = ext(file.name) === "csv" ? XLSX.read(new TextDecoder().decode(buf), { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
-    const DEPCOL = /departamental|delegacion|depto|dpto|colegio|asociacion|union/;
+    const DEPRX = /departamental|delegacion|depto|dpto|colegio|asociacion|union/;
+    const DEPCOL = { test: s => s.length <= 30 && DEPRX.test(s) }; // encabezado corto, no un título largo
     let columnas = [], rows = [], bad = [];
     for (const sn of wb.SheetNames) {
       const grid = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: false, blankrows: false, defval: "" })
@@ -951,15 +952,33 @@ async function previewIns(file) {
         // Sin encabezado claro: la columna con más valores que coinciden con departamentales.
         let best = 0;
         head.forEach((_, i) => { const n = grid.slice(hi + 1).filter(r => matchDep(r[i])).length; if (n > best) { best = n; depIdx = i; } });
+        if (best < Math.max(2, (grid.length - hi - 1) * 0.5)) continue; // hoja sin delegaciones (p. ej. «Programa»): se ignora
       }
-      head.forEach((h, i) => { if (i !== depIdx && !columnas.includes(h)) columnas.push(h); });
+      // Título arriba del encabezado (p. ej. «1 50 mts Libres Caballeros Juvenil»): pasa a la columna Prueba.
+      const titulo = hi > 0 && grid[0].filter(Boolean).length === 1 ? grid[0].find(Boolean) : "";
+      // Datos que el delegado no necesita ver.
+      const HIDE = /f\.? ?nac|nacimiento|\bdni\b|documento|telefono|mail|^tiempo$|^posicion$|^puesto$/;
+      const nomIdx = head.findIndex(h => /^nombres?$/.test(norm(h))), apeIdx = head.findIndex(h => /^apellidos?(\(s\))?$/.test(norm(h)));
+      const juntar = nomIdx >= 0 && apeIdx >= 0;
+      const cols = [];
+      if (titulo) cols.push("Prueba");
+      head.forEach((h, i) => {
+        if (i === depIdx || i === nomIdx && juntar || HIDE.test(norm(h))) return;
+        cols.push(i === apeIdx && juntar ? "Apellido y nombre" : h);
+      });
+      cols.forEach(h => { if (!columnas.includes(h)) columnas.push(h); });
       grid.slice(hi + 1).forEach(r => {
         if (norm(r.join("|")) === norm(grid[hi].join("|"))) return;
         const raw = depIdx >= 0 ? r[depIdx] : sn;
         const dep = depIdx >= 0 ? matchDep(raw) : sheetDep;
         const fila = {};
-        head.forEach((h, i) => { if (i !== depIdx && r[i]) fila[h] = r[i]; });
+        head.forEach((h, i) => {
+          if (i === depIdx || i === nomIdx && juntar || HIDE.test(norm(h)) || !r[i]) return;
+          if (i === apeIdx && juntar) fila["Apellido y nombre"] = [r[apeIdx], r[nomIdx]].filter(Boolean).join(", ");
+          else fila[h] = r[i];
+        });
         if (!Object.keys(fila).length) return;
+        if (titulo) fila.Prueba = titulo;
         if (dep) rows.push({ departamental: dep, fila }); else bad.push(raw || "(vacío)");
       });
     }
