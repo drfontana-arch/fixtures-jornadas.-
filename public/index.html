@@ -101,6 +101,9 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .nmeta{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .nmeta .row{gap:12px}
 .linkish.danger{color:var(--warn)}
+.note.annex{flex-direction:row;align-items:center;gap:10px}
+.annex-txt{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.annex-txt a{color:var(--ink);font-weight:600;overflow-wrap:anywhere}
 .add-note{align-self:flex-start;padding:7px 12px;font-size:13px;border-style:dashed}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .tile{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -225,7 +228,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const $ = s => document.querySelector(s);
 const ALL = "";
-const S = { docs: [], notes: [], noteEdit: null, noteConfirm: null, replacing: null, disc: null, cat: ALL, f: { dep: ALL, dia: ALL, cancha: ALL }, session: null, canEdit: false, open: {}, confirm: null, loaded: false, error: null };
+const S = { docs: [], annex: [], annexing: null, notes: [], noteEdit: null, noteConfirm: null, replacing: null, disc: null, cat: ALL, f: { dep: ALL, dia: ALL, cancha: ALL }, session: null, canEdit: false, open: {}, confirm: null, loaded: false, error: null };
 try { const saved = JSON.parse(localStorage.getItem("fx-nav") || "{}"); S.disc = saved.disc || null; S.cat = saved.cat || ALL; } catch (e) {}
 const saveNav = () => { try { localStorage.setItem("fx-nav", JSON.stringify({ disc: S.disc, cat: S.cat })); } catch (e) {} };
 
@@ -253,7 +256,9 @@ async function load() {
   ]);
   S.loaded = true;
   if (error) { S.error = "No se pudieron cargar los fixtures. Revisá tu conexión y recargá la página."; render(); return; }
-  S.error = null; S.docs = data || []; S.notes = notes.data || [];
+  S.error = null; S.notes = notes.data || [];
+  S.docs = (data || []).filter(d => !d.anexo_de);
+  S.annex = (data || []).filter(d => d.anexo_de);
   render();
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
@@ -456,8 +461,44 @@ function card(d) {
   const mine = S.notes.filter(n => n.fixture_id === d.id);
   const notes = notesBlock(mine, d);
   if (notes) c.append(notes);
-  if (mine.length || S.noteEdit?.fixtureId === d.id) c.classList.add("wide");
+  const anexos = S.annex.filter(a => a.anexo_de === d.id);
+  const ax = annexBlock(anexos, d);
+  if (ax) c.append(ax);
+  if (mine.length || anexos.length || S.noteEdit?.fixtureId === d.id) c.classList.add("wide");
   return c;
+}
+
+/* ---------- anexos de correcciones ---------- */
+function annexBlock(list, d) {
+  if (!list.length && !S.canEdit) return null;
+  const box = el("div", { class: "notes" });
+  if (list.length) box.append(el("div", { class: "notes-h" }, "Anexos de correcciones", el("span", { class: "n", text: ` ${list.length}` })));
+  list.forEach(a => box.append(el("div", { class: "note annex" },
+    el("span", { class: "ftype", text: typeLabel(a) }),
+    el("div", { class: "annex-txt" }, el("a", { href: publicUrl(a.path), target: "_blank", rel: "noopener", onclick: () => track("abrir", a.id), text: a.titulo }),
+      el("span", { class: "nmeta", text: `${fmtNota(a.created_at)} · ${fmtSize(a.size || 0)}` })),
+    S.canEdit ? (S.confirm === a.id
+      ? el("span", { class: "confirm" }, "¿Borrar?", el("button", { class: "linkish danger", onclick: () => remove(a) }, "Sí"), el("button", { class: "linkish", onclick: () => { S.confirm = null; render(); } }, "No"))
+      : el("button", { class: "linkish danger", onclick: () => { S.confirm = a.id; render(); } }, "Borrar")) : null)));
+  if (S.canEdit) {
+    const inp = el("input", { type: "file", multiple: true, hidden: true, onchange: e => e.target.files.length && uploadAnnex(d, [...e.target.files]) });
+    box.append(inp, el("button", { class: "add-note", onclick: () => inp.click() }, S.annexing === d.id ? "Subiendo…" : "+ Adjuntar anexo de correcciones"));
+  }
+  return box;
+}
+async function uploadAnnex(d, files) {
+  S.annexing = d.id; render();
+  let fails = 0;
+  for (const file of files) {
+    const path = `${crypto.randomUUID()}/${safeName(file.name)}`;
+    const up = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
+    if (up.error) { fails++; continue; }
+    const ins = await sb.from(TABLE).insert({ disciplina: d.disciplina, categoria: d.categoria, titulo: file.name.replace(/\.[^.]+$/, ""), path, content_type: file.type || null, size: file.size, archivo: file.name, anexo_de: d.id });
+    if (ins.error) { fails++; await sb.storage.from(BUCKET).remove([path]); }
+  }
+  S.annexing = null;
+  if (fails) $("#results").prepend(el("p", { class: "msg err", text: `No se pudo subir ${fails} anexo${fails === 1 ? "" : "s"}.` }));
+  load();
 }
 
 /* ---------- reclamos y correcciones ---------- */
@@ -615,7 +656,8 @@ async function remove(d) {
   S.confirm = null;
   const { error } = await sb.from(TABLE).delete().eq("id", d.id);
   if (error) { $("#results").prepend(el("p", { class: "msg err", text: "No se pudo borrar. Volvé a ingresar e intentá de nuevo." })); return; }
-  await sb.storage.from(BUCKET).remove([d.path]);
+  // Los anexos se borran con su fixture (en cascada); también sus archivos.
+  await sb.storage.from(BUCKET).remove([d.path, ...S.annex.filter(a => a.anexo_de === d.id).map(a => a.path)]);
   load();
 }
 
