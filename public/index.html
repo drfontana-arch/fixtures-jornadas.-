@@ -440,9 +440,8 @@ function render() {
     return;
   }
 
-  if (isInsDisc(S.disc)) out.append(el("div", { class: "ins-callout" },
-    el("span", {}, "Los inscriptos de esta disciplina se consultan con el código de tu delegación."),
-    el("button", { class: "primary", onclick: openInsPanel }, "Ver inscriptos de mi delegación")));
+  // Disciplinas con inscriptos por delegación: el mismo afiche de la portada.
+  if (isInsDisc(S.disc)) out.append(poster(true, false));
 
   // Leer las planillas de la pestaña actual (una sola vez cada una).
   const sheets = inCat.filter(isSheet);
@@ -492,7 +491,7 @@ function render() {
   if (orphans.length) out.append(el("section", { class: "day" }, el("div", { class: "card" }, notesBlock(orphans, null, "Reclamos de archivos anteriores"))));
 }
 // Portada: el aviso de la organización, grande, como un afiche.
-function poster(hayDisciplinas) {
+function poster(hayDisciplinas, enPortada = true) {
   return el("section", { class: "poster", "aria-label": "Aviso de la organización" },
     el("span", { class: "poster-kicker", text: "Importante" }),
     el("p", { class: "poster-main", text: "Recordá solicitar tu código de departamental al teléfono de Grupo Arenas." }),
@@ -500,7 +499,7 @@ function poster(hayDisciplinas) {
     el("p", { class: "poster-thanks", text: "Desde ya, muchas gracias." }),
     el("div", { class: "row", style: "justify-content:center" },
       el("button", { class: "primary", onclick: openInsPanel }, "Inscriptos de mi delegación")),
-    el("p", { class: "hint", text: S.loaded && !hayDisciplinas ? "Todavía no hay fixtures publicados." : "Para ver los fixtures, elegí una disciplina arriba." }));
+    enPortada ? el("p", { class: "hint", text: S.loaded && !hayDisciplinas ? "Todavía no hay fixtures publicados." : "Para ver los fixtures, elegí una disciplina arriba." }) : null);
 }
 function goHome() {
   S.disc = null; S.cat = ALL; resetF(); S.confirm = null; S.noteEdit = null;
