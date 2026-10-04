@@ -903,13 +903,14 @@ $("#stCsv").onclick = () => {
 /* ---------- inscriptos por delegación (con código) ---------- */
 const CONTACTO = "la organización (pedilo por privado)";
 const INS_DISC = ["Tiro", "Ajedrez", "Travesía 4x4", "Pesca", "Maratón y Caminata", "Patín Carrera", "Natación"];
-const DEPS = ["Avellaneda-Lanús", "Azul", "Bahía Blanca", "Dolores", "Junín", "Justicia Nacional", "La Matanza", "La Plata", "Lomas de Zamora", "Mar del Plata", "Mercedes", "Moreno-Gral. Rodríguez", "Morón", "Nacional (invitado)", "Necochea", "Pergamino", "Quilmes", "San Isidro", "San Martín", "San Nicolás", "Trenque Lauquen", "Zárate-Campana"];
+const DEPS = ["Avellaneda-Lanús", "Azul", "Bahía Blanca", "Dolores", "Junín", "Justicia Nacional", "La Matanza", "La Plata", "Lomas de Zamora", "Mar del Plata", "Mercedes", "Moreno-Gral. Rodríguez", "Morón", "Necochea", "Pergamino", "Quilmes", "San Isidro", "San Martín", "San Nicolás", "Trenque Lauquen", "Zárate-Campana"];
 const key = s => norm(s).replace(/[^a-z0-9]/g, "");
 const isInsDisc = name => { const k = key(name); return INS_DISC.some(d => { const x = key(d); return k === x || k.includes(x) || x.includes(k) || (k.includes("maraton") && x.includes("maraton")) || (k.includes("travesia") && x.includes("travesia")) || (k.includes("patin") && x.includes("patin")); }); };
 // Reconoce la departamental aunque esté escrita distinto ("Avellaneda Lanus", "DEPTO. MORON", "Moreno").
 function matchDep(v) {
   const k = key(v).replace(/^(departamental|depto|dpto|delegacion|colegio)/, "");
   if (!k) return null;
+  if (/^nacional/.test(k)) return "Justicia Nacional"; // "Nacional", "Nacional (invitado)" = Justicia Nacional
   return DEPS.find(d => key(d) === k) || DEPS.find(d => k.includes(key(d))) || DEPS.find(d => key(d).startsWith(k) && k.length >= 4) || null;
 }
 $("#dlInsDisc").replaceChildren(...INS_DISC.map(v => el("option", { value: v })));
@@ -1099,14 +1100,14 @@ async function loadInsAdmin() {
         el("td", { text: count(null, c.departamental) || "–" }),
         el("td", {}, el("span", { class: "row" },
           el("button", { class: "linkish", onclick: async ev => { try { await navigator.clipboard.writeText(msgFor(c)); ev.target.textContent = "¡Copiado!"; } catch (e) { ev.target.textContent = "No se pudo copiar"; } setTimeout(() => { ev.target.textContent = "Copiar mensaje"; }, 2000); } }, "Copiar mensaje"),
-          S.confirm === "code:" + c.departamental
+          S.confirm === "code:" + c.code
             ? el("span", { class: "confirm" }, "¿Cambiar?", el("button", { class: "linkish danger", onclick: () => newCode(c) }, "Sí"), el("button", { class: "linkish", onclick: () => { S.confirm = null; loadInsAdmin(); } }, "No"))
-            : el("button", { class: "linkish", onclick: () => { S.confirm = "code:" + c.departamental; loadInsAdmin(); } }, "Código nuevo"))))))))));
+            : el("button", { class: "linkish", onclick: () => { S.confirm = "code:" + c.code; loadInsAdmin(); } }, "Código nuevo"))))))))));
 }
 async function newCode(c) {
   S.confirm = null;
   const { data } = await sb.rpc("fixture_new_code");
-  if (data) await sb.from("fixture_codes").update({ code: data, created_at: new Date().toISOString() }).eq("departamental", c.departamental);
+  if (data) await sb.from("fixture_codes").update({ code: data, created_at: new Date().toISOString() }).eq("code", c.code); // una delegación puede tener más de un código
   loadInsAdmin();
 }
 if (location.hash === "#inscriptos") setTimeout(openInsPanel, 300);
