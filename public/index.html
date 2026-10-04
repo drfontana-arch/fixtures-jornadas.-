@@ -880,7 +880,7 @@ const isInsDisc = name => { const k = key(name); return INS_DISC.some(d => { con
 function matchDep(v) {
   const k = key(v).replace(/^(departamental|depto|dpto|delegacion|colegio)/, "");
   if (!k) return null;
-  return DEPS.find(d => key(d) === k) || DEPS.find(d => k.includes(key(d))) || DEPS.find(d => key(d).startsWith(k) && k.length >= 4) || DEPS.find(d => k.length >= 5 && key(d).includes(k)) || null;
+  return DEPS.find(d => key(d) === k) || DEPS.find(d => k.includes(key(d))) || DEPS.find(d => key(d).startsWith(k) && k.length >= 4) || null;
 }
 $("#dlInsDisc").replaceChildren(...INS_DISC.map(v => el("option", { value: v })));
 $("#insHint").textContent = `Cada delegación ve solo sus inscriptos. Pedí el código de tu delegación a ${CONTACTO}.`;
@@ -924,6 +924,8 @@ async function consultarIns(code) {
 }
 
 /* ---------- carga de inscriptos (organización) ---------- */
+// "GUILLERMO" → "Guillermo"; los nombres que ya vienen en mayúsculas y minúsculas no se tocan.
+const nombrePropio = s => s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : s;
 const IA = { rows: null };
 $("#openInsAdmin").onclick = () => { const p = $("#insAdmin"); p.hidden = !p.hidden; $("#openInsAdmin").setAttribute("aria-expanded", String(!p.hidden)); if (!p.hidden) { loadInsAdmin(); p.scrollIntoView({ behavior: "smooth" }); } };
 $("#iaClose").onclick = () => { $("#insAdmin").hidden = true; $("#openInsAdmin").setAttribute("aria-expanded", "false"); };
@@ -945,7 +947,27 @@ async function previewIns(file) {
       // Encabezado: entre las primeras 15 filas, la que nombra la departamental o la primera con 3+ celdas.
       let hi = grid.slice(0, 15).findIndex(r => r.some(c => DEPCOL.test(norm(c))));
       if (hi < 0) hi = Math.max(0, grid.slice(0, 15).findIndex(r => r.filter(Boolean).length >= 3));
-      const head = grid[hi].map((h, i) => h || `Col ${i + 1}`);
+      let head = grid[hi].map((h, i) => h || `Col ${i + 1}`);
+      // Planilla sin encabezados (la primera fila ya es un inscripto): se nombran las columnas por su contenido.
+      // Columna de delegación = la que tiene más valores reconocibles (no alcanza con la primera fila: "Nicolás" ≠ San Nicolás).
+      let depVal = -1, depBest = 0;
+      grid[hi].forEach((_, i) => { const n = grid.slice(hi).filter(r => matchDep(r[i])).length; if (n > depBest) { depBest = n; depVal = i; } });
+      if (depBest < (grid.length - hi) * 0.6) depVal = -1;
+      if (!head.some(h => DEPCOL.test(norm(h))) && depVal >= 0 && matchDep(grid[hi][depVal])) {
+        const data = grid.slice(hi);
+        const width = Math.max(...data.map(r => r.length));
+        const vals = i => data.map(r => r[i] || "");
+        const constante = i => new Set(vals(i)).size === 1;
+        const numerica = i => vals(i).every(v => /^\d*$/.test(v));
+        const antes = [...Array(depVal).keys()].filter(i => !numerica(i) && !constante(i));
+        head = [...Array(width).keys()].map(i =>
+          i === depVal ? "Departamental"
+          : numerica(i) || constante(i) ? "__oculta"
+          : antes.length >= 2 && i === antes[0] ? "Nombre"
+          : antes.length >= 2 && i === antes[1] ? "Apellido"
+          : i < depVal ? "Apellido y nombre" : "Categoría");
+        grid.splice(hi, 0, head); // la fila sintética de encabezados ocupa el lugar de hi
+      }
       let depIdx = head.findIndex(h => DEPCOL.test(norm(h)));
       const sheetDep = matchDep(sn);
       if (depIdx < 0 && !sheetDep) {
@@ -957,7 +979,7 @@ async function previewIns(file) {
       // Título arriba del encabezado (p. ej. «1 50 mts Libres Caballeros Juvenil»): pasa a la columna Prueba.
       const titulo = hi > 0 && grid[0].filter(Boolean).length === 1 ? grid[0].find(Boolean) : "";
       // Datos que el delegado no necesita ver.
-      const HIDE = /f\.? ?nac|nacimiento|\bdni\b|documento|telefono|mail|^tiempo$|^posicion$|^puesto$/;
+      const HIDE = /f\.? ?nac|nacimiento|\bdni\b|documento|telefono|mail|^tiempo$|^posicion$|^puesto$|^__oculta$/;
       const nomIdx = head.findIndex(h => /^nombres?$/.test(norm(h))), apeIdx = head.findIndex(h => /^apellidos?(\(s\))?$/.test(norm(h)));
       const juntar = nomIdx >= 0 && apeIdx >= 0;
       const cols = [];
@@ -974,7 +996,7 @@ async function previewIns(file) {
         const fila = {};
         head.forEach((h, i) => {
           if (i === depIdx || i === nomIdx && juntar || HIDE.test(norm(h)) || !r[i]) return;
-          if (i === apeIdx && juntar) fila["Apellido y nombre"] = [r[apeIdx], r[nomIdx]].filter(Boolean).join(", ");
+          if (i === apeIdx && juntar) fila["Apellido y nombre"] = [r[apeIdx], r[nomIdx]].filter(Boolean).map(nombrePropio).join(", ");
           else fila[h] = r[i];
         });
         if (!Object.keys(fila).length) return;
@@ -983,6 +1005,9 @@ async function previewIns(file) {
       });
     }
     columnas = columnas.filter(c => rows.some(r => r.fila[c]));
+    // Sin orden propio (pruebas/series): ordenar por categoría y nombre.
+    if (!columnas.includes("Prueba") && !columnas.includes("Serie"))
+      rows.sort((a, b) => coll.compare(a.fila["Categoría"] || "", b.fila["Categoría"] || "") || coll.compare(a.fila["Apellido y nombre"] || "", b.fila["Apellido y nombre"] || ""));
     IA.rows = rows; IA.columnas = columnas; IA.archivo = file.name;
     const porDep = DEPS.map(d => [d, rows.filter(r => r.departamental === d).length]);
     const badU = [...new Set(bad)];
